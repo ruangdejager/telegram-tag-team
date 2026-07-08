@@ -1,0 +1,20 @@
+{
+  "name": "farmranger-tag-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot that merges Farmranger tag-discovery logs from multiple devices and reports new discoveries.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test:parse": "node scripts/testParse.js",
+    "test:analytics": "node scripts/testAnalytics.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "node-telegram-bot-api": "^0.66.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
