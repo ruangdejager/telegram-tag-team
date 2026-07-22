@@ -11,7 +11,9 @@
 //   Total devices discovered: 9
 //   ---------------------------------
 //
-// Tag record fields (confirmed by user): id,hops,rssi,battery,waveCount,movementState,lat*1e6,lon*1e6
+// Tag record fields: id,hops,rssi,battery,waveCount,movementState,lat*1e6,lon*1e6[,fwVersionPatch]
+// The trailing fwVersionPatch field is optional — older/some records omit it entirely
+// (8 fields instead of 9), which is treated as "no fw version reported".
 // A block may instead contain "LOG TIMEOUT" somewhere in its body, indicating the
 // device failed to log a discovery round. Such blocks must be discarded entirely.
 
@@ -27,19 +29,33 @@ function toIsoTimestamp(time, offset, day, monStr, year) {
 
 function parseTagLine(line) {
   const parts = line.split(',').map((p) => p.trim());
-  if (parts.length !== 8) return null;
-  const [id, hops, rssi, battery, waveCount, movementState, latRaw, lonRaw] = parts;
+  if (parts.length !== 8 && parts.length !== 9) return null;
+  const [id, hops, rssi, battery, waveCount, movementState, latRaw, lonRaw, fwRaw] = parts;
+
+  const hopsNum = parseInt(hops, 10);
+  const rssiNum = parseInt(rssi, 10);
+  const batteryNum = parseInt(battery, 10);
+  const waveCountNum = parseInt(waveCount, 10);
+  const movementStateNum = parseInt(movementState, 10);
   const lat = parseInt(latRaw, 10);
   const lon = parseInt(lonRaw, 10);
+  // Rejects non-tag rows that happen to have the right field count, e.g. the
+  // 'DeviceId,Hops,RSSI,...' CSV header line some blocks now include under
+  // "Tag Discovery:" — its numeric columns won't parse as numbers.
+  if ([hopsNum, rssiNum, batteryNum, waveCountNum, movementStateNum, lat, lon].some(Number.isNaN)) return null;
+
+  const fwVersionPatch = fwRaw !== undefined ? parseInt(fwRaw, 10) : NaN;
   return {
     id: id.toUpperCase(),
-    hops: parseInt(hops, 10),
-    rssi: parseInt(rssi, 10),
-    battery: parseInt(battery, 10),
-    waveCount: parseInt(waveCount, 10),
-    movementState: parseInt(movementState, 10),
+    hops: hopsNum,
+    rssi: rssiNum,
+    battery: batteryNum,
+    waveCount: waveCountNum,
+    movementState: movementStateNum,
     lat: lat === 0 ? null : lat / 1e6,
     lon: lon === 0 ? null : lon / 1e6,
+    hasGps: !(lat === 0 && lon === 0),
+    fwVersionPatch: Number.isNaN(fwVersionPatch) ? null : fwVersionPatch,
   };
 }
 

@@ -51,7 +51,22 @@ function bucketToSession(bracketEpoch, blocks) {
     if (!perDeviceTagIds[block.unitId]) perDeviceTagIds[block.unitId] = new Set();
     for (const tag of block.tags) {
       perDeviceTagIds[block.unitId].add(tag.id);
-      if (!tagById.has(tag.id)) tagById.set(tag.id, { ...tag, sourceUnitId: block.unitId });
+      const existing = tagById.get(tag.id);
+      if (!existing) {
+        tagById.set(tag.id, { ...tag, sourceUnitId: block.unitId });
+      } else {
+        // Per-scan readings (rssi/battery/etc.) keep whichever device saw the tag first —
+        // but fw version and GPS are properties of the tag itself, so backfill them from
+        // this block if the first-seen block didn't happen to report them.
+        if (existing.fwVersionPatch === null && tag.fwVersionPatch !== null) {
+          existing.fwVersionPatch = tag.fwVersionPatch;
+        }
+        if (!existing.hasGps && tag.hasGps) {
+          existing.hasGps = true;
+          existing.lat = tag.lat;
+          existing.lon = tag.lon;
+        }
+      }
     }
   }
 

@@ -10,21 +10,28 @@ export function formatSessionMessage(session) {
   const header = `🏷 <b>Tag Discovery — ${session.time} (${session.date})</b>\n` +
     `<i>Per-device: ${formatPerDeviceTotals(session.perDeviceTotals)} → Combined unique: ${session.total}</i>\n\n`;
 
-  const C = { ID: 6, HOPS: 4, RSSI: 5, BATT: 6, WAVE: 5, MOVE: 4 };
+  const showFw = session.tags.some((t) => t.fwVersionPatch !== null);
+
+  const C = { ID: 6, HOPS: 4, RSSI: 5, BATT: 6, WAVE: 5, MOVE: 4, GPS: 4, FW: 5 };
   const dashes = (n) => '-'.repeat(n);
-  const div = dashes(C.ID) + '-+-' + dashes(C.HOPS) + '-+-' + dashes(C.RSSI) + '-+-' +
-    dashes(C.BATT) + '-+-' + dashes(C.WAVE) + '-+-' + dashes(C.MOVE);
-  const rows = [
-    lpad('Tag ID', C.ID) + ' | ' + lpad('Hops', C.HOPS) + ' | ' + lpad('RSSI', C.RSSI) + ' | ' +
-      lpad('Batt', C.BATT) + ' | ' + lpad('Waves', C.WAVE) + ' | ' + lpad('Mov', C.MOVE),
-    div,
+  const cols = [C.ID, C.HOPS, C.RSSI, C.BATT, C.WAVE, C.MOVE, C.GPS];
+  if (showFw) cols.push(C.FW);
+  const div = cols.map(dashes).join('-+-');
+
+  const headerCells = [
+    lpad('Tag ID', C.ID), lpad('Hops', C.HOPS), lpad('RSSI', C.RSSI), lpad('Batt', C.BATT),
+    lpad('Waves', C.WAVE), lpad('Mov', C.MOVE), lpad('GPS', C.GPS),
   ];
+  if (showFw) headerCells.push(lpad('FW', C.FW));
+  const rows = [headerCells.join(' | '), div];
 
   session.tags.forEach((t) => {
-    rows.push(
-      lpad(t.id, C.ID) + ' | ' + lpad(t.hops, C.HOPS) + ' | ' + lpad(t.rssi, C.RSSI) + ' | ' +
-        lpad(t.battery, C.BATT) + ' | ' + lpad(t.waveCount, C.WAVE) + ' | ' + lpad(t.movementState, C.MOVE)
-    );
+    const cells = [
+      lpad(t.id, C.ID), lpad(t.hops, C.HOPS), lpad(t.rssi, C.RSSI), lpad(t.battery, C.BATT),
+      lpad(t.waveCount, C.WAVE), lpad(t.movementState, C.MOVE), lpad(t.hasGps ? 'Y' : 'N', C.GPS),
+    ];
+    if (showFw) cells.push(lpad(t.fwVersionPatch !== null ? t.fwVersionPatch : '', C.FW));
+    rows.push(cells.join(' | '));
   });
   rows.push(div);
   rows.push(`Total: ${session.total} tag${session.total !== 1 ? 's' : ''}`);
