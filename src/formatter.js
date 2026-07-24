@@ -6,31 +6,42 @@ function lpad(str, width) {
   return str.substring(0, width);
 }
 
+function dashes(n) {
+  return '-'.repeat(n);
+}
+
+// Column presence varies by discovery mode (advanced has Hops/Waves, basic doesn't;
+// fw version may or may not be reported) — each optional column is only shown if at
+// least one tag in the session actually has a value for it.
+const COLUMN_DEFS = [
+  { label: 'Tag ID', width: 6, always: true, get: (t) => t.id },
+  { label: 'Hops', width: 4, get: (t) => t.hops },
+  { label: 'RSSI', width: 6, always: true, get: (t) => t.rssi },
+  { label: 'Batt', width: 6, always: true, get: (t) => t.battery },
+  { label: 'Waves', width: 5, get: (t) => t.waveCount },
+  { label: 'Mov', width: 4, get: (t) => t.movementState },
+  { label: 'GPS', width: 4, always: true, get: (t) => (t.hasGps ? 'Y' : 'N') },
+  { label: 'FW', width: 5, get: (t) => t.fwVersionPatch },
+];
+
 export function formatSessionMessage(session) {
   const header = `🏷 <b>Tag Discovery — ${session.time} (${session.date})</b>\n` +
     `<i>Per-device: ${formatPerDeviceTotals(session.perDeviceTotals)} → Combined unique: ${session.total}</i>\n\n`;
 
-  const showFw = session.tags.some((t) => t.fwVersionPatch !== null);
-
-  const C = { ID: 6, HOPS: 4, RSSI: 5, BATT: 6, WAVE: 5, MOVE: 4, GPS: 4, FW: 5 };
-  const dashes = (n) => '-'.repeat(n);
-  const cols = [C.ID, C.HOPS, C.RSSI, C.BATT, C.WAVE, C.MOVE, C.GPS];
-  if (showFw) cols.push(C.FW);
-  const div = cols.map(dashes).join('-+-');
-
-  const headerCells = [
-    lpad('Tag ID', C.ID), lpad('Hops', C.HOPS), lpad('RSSI', C.RSSI), lpad('Batt', C.BATT),
-    lpad('Waves', C.WAVE), lpad('Mov', C.MOVE), lpad('GPS', C.GPS),
+  const activeCols = COLUMN_DEFS.filter(
+    (c) => c.always || session.tags.some((t) => c.get(t) !== null && c.get(t) !== undefined)
+  );
+  const div = activeCols.map((c) => dashes(c.width)).join('-+-');
+  const rows = [
+    activeCols.map((c) => lpad(c.label, c.width)).join(' | '),
+    div,
   ];
-  if (showFw) headerCells.push(lpad('FW', C.FW));
-  const rows = [headerCells.join(' | '), div];
 
   session.tags.forEach((t) => {
-    const cells = [
-      lpad(t.id, C.ID), lpad(t.hops, C.HOPS), lpad(t.rssi, C.RSSI), lpad(t.battery, C.BATT),
-      lpad(t.waveCount, C.WAVE), lpad(t.movementState, C.MOVE), lpad(t.hasGps ? 'Y' : 'N', C.GPS),
-    ];
-    if (showFw) cells.push(lpad(t.fwVersionPatch !== null ? t.fwVersionPatch : '', C.FW));
+    const cells = activeCols.map((c) => {
+      const v = c.get(t);
+      return lpad(v === null || v === undefined ? '' : v, c.width);
+    });
     rows.push(cells.join(' | '));
   });
   rows.push(div);

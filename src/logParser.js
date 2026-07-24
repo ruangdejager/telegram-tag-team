@@ -3,23 +3,67 @@
 // Block header example:
 //   *00:00:29(+02:00) Mon 06-Jul-2026 4019mV
 //   ---------------------------------
-//   Tag Discovery:
+//   Tag Discovery (advanced):
+//   DeviceId,Hops,Wave,RSSI,BatMv,Move,Lat,Lon,FwPatch
 //
-//   3194,1,-85,4055,1,1,0,0
+//   3E1E,1,1,-68,3637,1,0,0,22
 //   ...
 //
-//   Total devices discovered: 9
+//   Total devices discovered: 11
 //   ---------------------------------
 //
-// Tag record fields: id,hops,rssi,battery,waveCount,movementState,lat*1e6,lon*1e6[,fwVersionPatch]
-// The trailing fwVersionPatch field is optional — older/some records omit it entirely
-// (8 fields instead of 9), which is treated as "no fw version reported".
+// The device now self-describes its own column order via a CSV header line
+// right after "Tag Discovery (...):"  — column order is NOT assumed to be
+// fixed (it has already changed between firmware versions), so it's read
+// from that header every time rather than hardcoded.
+//
+// Two known modes, each with a different field set:
+//   advanced: DeviceId,Hops,Wave,RSSI,BatMv,Move,Lat,Lon,FwPatch
+//   basic:    DeviceId,BatMv,RSSI,Move,FwPatch,Lat,Lon,AgeS
+// Older logs may have no mode label and no header line at all — those fall
+// back to the original known column order.
+//
 // A block may instead contain "LOG TIMEOUT" somewhere in its body, indicating the
 // device failed to log a discovery round. Such blocks must be discarded entirely.
 
 import { MONTHS } from './utils.js';
 
 const HEADER_RE = /\*(\d{2}:\d{2}:\d{2})\(([+-]\d{2}:\d{2})\)\s+\w+\s+(\d{2})-(\w{3})-(\d{4})\s+(\d+)mV/g;
+const TAG_SECTION_RE = /Tag Discovery(?:\s*\([^)]*\))?:([\s\S]*?)Total devices discovered:/i;
+
+// Maps a normalized header column name to our internal field name.
+const COLUMN_ALIASES = {
+  deviceid: 'id',
+  hops: 'hops',
+  wave: 'waveCount',
+  rssi: 'rssi',
+  batmv: 'battery',
+  move: 'movementState',
+  lat: 'lat',
+  lon: 'lon',
+  fwpatch: 'fwVersionPatch',
+  ages: 'gpsAgeSeconds',
+};
+
+// Fallback for logs predating the self-describing header line.
+const DEFAULT_HEADER = 'DeviceId,Hops,RSSI,BatMv,Wave,Move,Lat,Lon,FwPatch';
+
+function normalizeColumnName(name) {
+  return name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function buildColumnMap(headerLine) {
+  const map = {};
+  headerLine.split(',').forEach((raw, index) => {
+    const field = COLUMN_ALIASES[normalizeColumnName(raw)];
+    if (field) map[field] = index;
+  });
+  return map;
+}
+
+function isHeaderLine(line) {
+  return normalizeColumnName(line.split(',')[0] || '') === 'deviceid';
+}
 
 function toIsoTimestamp(time, offset, day, monStr, year) {
   const month = MONTHS[monStr];
@@ -27,36 +71,69 @@ function toIsoTimestamp(time, offset, day, monStr, year) {
   return `${year}-${month}-${day}T${time}${offset}`;
 }
 
-function parseTagLine(line) {
-  const parts = line.split(',').map((p) => p.trim());
-  if (parts.length !== 8 && parts.length !== 9) return null;
-  const [id, hops, rssi, battery, waveCount, movementState, latRaw, lonRaw, fwRaw] = parts;
+function parseTagRow(rowParts, columnMap) {
+  const field = (name) => {
+    const index = columnMap[name];
+    if (index === undefined || index >= rowParts.length) return undefined;
+    const value = rowParts[index];
+    return value === '' ? undefined : value;
+  };
 
-  const hopsNum = parseInt(hops, 10);
-  const rssiNum = parseInt(rssi, 10);
-  const batteryNum = parseInt(battery, 10);
-  const waveCountNum = parseInt(waveCount, 10);
-  const movementStateNum = parseInt(movementState, 10);
-  const lat = parseInt(latRaw, 10);
-  const lon = parseInt(lonRaw, 10);
-  // Rejects non-tag rows that happen to have the right field count, e.g. the
-  // 'DeviceId,Hops,RSSI,...' CSV header line some blocks now include under
-  // "Tag Discovery:" — its numeric columns won't parse as numbers.
-  if ([hopsNum, rssiNum, batteryNum, waveCountNum, movementStateNum, lat, lon].some(Number.isNaN)) return null;
+  const id = field('id');
+  const battery = parseFloat(field('battery'));
+  const rssi = parseFloat(field('rssi'));
+  // Guards against stray non-tag rows (e.g. a header line the mode-detection above
+  // missed) — every real tag row has an id plus valid battery/RSSI readings.
+  if (!id || Number.isNaN(battery) || Number.isNaN(rssi)) return null;
 
-  const fwVersionPatch = fwRaw !== undefined ? parseInt(fwRaw, 10) : NaN;
+  const toIntOrNull = (name) => {
+    const raw = field(name);
+    if (raw === undefined) return null;
+    const n = parseInt(raw, 10);
+    return Number.isNaN(n) ? null : n;
+  };
+
+  const latRaw = field('lat');
+  const lonRaw = field('lon');
+  const lat = latRaw !== undefined ? parseInt(latRaw, 10) : NaN;
+  const lon = lonRaw !== undefined ? parseInt(lonRaw, 10) : NaN;
+  const hasGps = !Number.isNaN(lat) && !Number.isNaN(lon) && !(lat === 0 && lon === 0);
+
   return {
     id: id.toUpperCase(),
-    hops: hopsNum,
-    rssi: rssiNum,
-    battery: batteryNum,
-    waveCount: waveCountNum,
-    movementState: movementStateNum,
-    lat: lat === 0 ? null : lat / 1e6,
-    lon: lon === 0 ? null : lon / 1e6,
-    hasGps: !(lat === 0 && lon === 0),
-    fwVersionPatch: Number.isNaN(fwVersionPatch) ? null : fwVersionPatch,
+    hops: toIntOrNull('hops'),
+    waveCount: toIntOrNull('waveCount'),
+    rssi,
+    battery,
+    movementState: toIntOrNull('movementState'),
+    lat: hasGps ? lat / 1e6 : null,
+    lon: hasGps ? lon / 1e6 : null,
+    hasGps,
+    fwVersionPatch: toIntOrNull('fwVersionPatch'),
+    gpsAgeSeconds: toIntOrNull('gpsAgeSeconds'),
   };
+}
+
+function parseTagSection(sectionText) {
+  const lines = sectionText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return [];
+
+  let columnMap;
+  let dataLines;
+  if (isHeaderLine(lines[0])) {
+    columnMap = buildColumnMap(lines[0]);
+    dataLines = lines.slice(1);
+  } else {
+    columnMap = buildColumnMap(DEFAULT_HEADER);
+    dataLines = lines;
+  }
+
+  const tags = [];
+  for (const line of dataLines) {
+    const tag = parseTagRow(line.split(',').map((p) => p.trim()), columnMap);
+    if (tag) tags.push(tag);
+  }
+  return tags;
 }
 
 // Parses all discovery blocks out of a single device's raw log text.
@@ -90,16 +167,8 @@ export function parseLogText(fullText, unitId) {
     const totalMatch = body.match(/Total devices discovered:\s*(\d+)/i);
     const total = totalMatch ? parseInt(totalMatch[1], 10) : 0;
 
-    const tagSectionMatch = body.match(/Tag Discovery:([\s\S]*?)Total devices discovered:/i);
-    const tags = [];
-    if (tagSectionMatch) {
-      tagSectionMatch[1].split(/\r?\n/).forEach((line) => {
-        const trimmed = line.trim();
-        if (!trimmed) return;
-        const tag = parseTagLine(trimmed);
-        if (tag) tags.push(tag);
-      });
-    }
+    const tagSectionMatch = body.match(TAG_SECTION_RE);
+    const tags = tagSectionMatch ? parseTagSection(tagSectionMatch[1]) : [];
 
     blocks.push({ ...base, isTimeout: false, tags, total });
   }

@@ -21,9 +21,26 @@ npm start
 
 Then in Telegram, message the bot `/start` to see the menu.
 
-`npm run test:parse` and `npm run test:analytics` run the parser/merger/report
-formatters against fixtures in `test/fixtures/` without touching the network —
-useful for checking log-format changes before pointing at the real API.
+`npm run test:parse`, `npm run test:analytics`, and `npm run test:modes` run
+the parser/merger/report formatters against fixtures in `test/fixtures/`
+without touching the network — useful for checking log-format changes before
+pointing at the real API.
+
+### Log format
+
+Each device reports in one of two modes, self-described by a CSV header line
+under `Tag Discovery (advanced):` or `Tag Discovery (basic):` — column order
+and field set are read from that header, not hardcoded, since they've already
+changed between firmware versions:
+- **advanced**: `DeviceId,Hops,Wave,RSSI,BatMv,Move,Lat,Lon,FwPatch`
+- **basic**: `DeviceId,BatMv,RSSI,Move,FwPatch,Lat,Lon,AgeS` (no Hops/Wave;
+  `AgeS` = seconds since the GPS fix was taken)
+
+Different devices can run different modes simultaneously — merged session
+tables only show the Hops/Waves/FW columns if at least one tag in that session
+actually has a value for them. GPS is always shown as Y/N, never raw
+coordinates. Logs predating this header convention fall back to the original
+known column order.
 
 ## Features
 
