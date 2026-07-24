@@ -35,22 +35,14 @@ async function handleCallbackQuery(bot, query) {
 
   await bot.answerCallbackQuery(query.id);
 
-  if (data === 'hist_24h') {
-    const sessions = await fetchHistorySessions({ hoursBack: 24 });
-    if (sessions.length === 0) {
-      await sendWithButtons(bot, chatId, 'ℹ️ No tag discoveries in the last 24 hours.', subscribed);
-    } else {
-      for (let i = 0; i < sessions.length - 1; i++) {
-        await sendMessage(bot, chatId, formatSessionMessage(sessions[i]));
-      }
-      await sendWithButtons(bot, chatId, formatSessionMessage(sessions[sessions.length - 1]), subscribed);
-    }
+  if (data === 'hist_4h') {
+    await sendRawDiscoveryData(bot, chatId, subscribed, 4, 'last 4 hours');
+  } else if (data === 'hist_24h') {
+    await sendRawDiscoveryData(bot, chatId, subscribed, 24, 'last 24 hours');
   } else if (data === 'hist_3d') {
     await sendDailySummaries(bot, chatId, subscribed, { hoursBack: 72 }, 'last 3 days');
   } else if (data === 'hist_7d') {
     await sendDailySummaries(bot, chatId, subscribed, { hoursBack: 168 }, 'last 7 days');
-  } else if (data === 'hist_all') {
-    await sendDailySummaries(bot, chatId, subscribed, {}, 'all time');
   } else if (data === 'analytics_batt_chart') {
     const sessions = await fetchHistorySessions({});
     await sendBatteryChart(bot, chatId, buildTagSeries(sessions), subscribed);
@@ -61,6 +53,18 @@ async function handleCallbackQuery(bot, query) {
     optOut(chatId);
     await sendWithButtons(bot, chatId, '❌ You have unsubscribed from live updates.', false);
   }
+}
+
+async function sendRawDiscoveryData(bot, chatId, subscribed, hoursBack, label) {
+  const sessions = await fetchHistorySessions({ hoursBack });
+  if (sessions.length === 0) {
+    await sendWithButtons(bot, chatId, `ℹ️ No tag discoveries in the ${label}.`, subscribed);
+    return;
+  }
+  for (let i = 0; i < sessions.length - 1; i++) {
+    await sendMessage(bot, chatId, formatSessionMessage(sessions[i]));
+  }
+  await sendWithButtons(bot, chatId, formatSessionMessage(sessions[sessions.length - 1]), subscribed);
 }
 
 async function sendDailySummaries(bot, chatId, subscribed, range, label) {

@@ -6,8 +6,8 @@ discoveries to Telegram. If any device reports a `LOG TIMEOUT` for a round,
 that entire round is discarded across all devices and a warning is sent
 instead.
 
-Also has a `/start` menu (inline buttons) for on-demand queries: raw 24h data,
-3-day/7-day/all-time daily summaries, a battery chart, and opt-in/out of live
+Also has a `/start` menu (inline buttons) for on-demand queries: raw 4h/24h
+data, 3-day/7-day daily summaries, a battery chart, and opt-in/out of live
 push updates. History never reaches earlier than `HISTORY_START` (device data
 isn't valid before then).
 
@@ -49,8 +49,8 @@ known column order.
 - **LOG TIMEOUT handling**: if any device's block for a round is a timeout, the
   whole round is discarded (all devices) and a warning is sent instead of data.
 - **`/start` menu**:
-  - 📋 Last 24h Raw Discovery Data — full per-session tag tables.
-  - 📊 3-Day / 7-Day / All-Time Summary — grouped by day, showing **total
+  - 📋 Last 4h / Last 24h Raw Discovery Data — full per-session tag tables.
+  - 📊 3-Day / 7-Day Summary — grouped by day, showing **total
     discoveries that day**, **combined unique tag count per discovery**
     (deduped across all devices) alongside each device's own count, plus the
     day's full unique-tag roll-up.
