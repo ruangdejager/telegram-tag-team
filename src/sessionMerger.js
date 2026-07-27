@@ -47,8 +47,12 @@ function bucketToSession(bracketEpoch, blocks) {
 
   const tagById = new Map();
   const perDeviceTagIds = {}; // unitId -> Set of tag IDs, deduped across that device's own blocks too
+  const perDeviceFwVersion = {}; // unitId -> reading device's own firmware version, if reported
   for (const block of blocks) {
     if (!perDeviceTagIds[block.unitId]) perDeviceTagIds[block.unitId] = new Set();
+    if (!perDeviceFwVersion[block.unitId] && block.readerFwVersion) {
+      perDeviceFwVersion[block.unitId] = block.readerFwVersion;
+    }
     for (const tag of block.tags) {
       perDeviceTagIds[block.unitId].add(tag.id);
       const existing = tagById.get(tag.id);
@@ -82,5 +86,6 @@ function bucketToSession(bracketEpoch, blocks) {
     tags: [...tagById.values()],
     total: tagById.size,
     perDeviceTotals,
+    perDeviceFwVersion,
   };
 }

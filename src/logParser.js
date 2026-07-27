@@ -29,7 +29,11 @@
 import { MONTHS } from './utils.js';
 
 const HEADER_RE = /\*(\d{2}:\d{2}:\d{2})\(([+-]\d{2}:\d{2})\)\s+\w+\s+(\d{2})-(\w{3})-(\d{4})\s+(\d+)mV/g;
-const TAG_SECTION_RE = /Tag Discovery(?:\s*\([^)]*\))?:([\s\S]*?)Total devices discovered:/i;
+// Captures the mode label (e.g. "advanced") and any trailing free text before the colon
+// (e.g. " primary v2.0.1", which carries the reading device's own firmware version) —
+// separately from the tag section body itself.
+const TAG_SECTION_RE = /Tag Discovery(?:\s*\(([^)]*)\))?([^:\n]*):([\s\S]*?)Total devices discovered:/i;
+const FW_VERSION_RE = /v?\d+(?:\.\d+){1,3}/i;
 
 // Maps a normalized header column name to our internal field name.
 const COLUMN_ALIASES = {
@@ -71,6 +75,19 @@ function toIsoTimestamp(time, offset, day, monStr, year) {
   return `${year}-${month}-${day}T${time}${offset}`;
 }
 
+// Tag IDs are always 4 printable-ASCII characters, but occasionally arrive with a stray
+// non-printable control character stuck to one edge — strip those, not interior chars.
+function sanitizeTagId(raw) {
+  let s = raw;
+  const isPrintable = (ch) => {
+    const code = ch.charCodeAt(0);
+    return code >= 32 && code <= 126;
+  };
+  while (s.length && !isPrintable(s[0])) s = s.slice(1);
+  while (s.length && !isPrintable(s[s.length - 1])) s = s.slice(0, -1);
+  return s;
+}
+
 function parseTagRow(rowParts, columnMap) {
   const field = (name) => {
     const index = columnMap[name];
@@ -100,7 +117,7 @@ function parseTagRow(rowParts, columnMap) {
   const hasGps = !Number.isNaN(lat) && !Number.isNaN(lon) && !(lat === 0 && lon === 0);
 
   return {
-    id: id.toUpperCase(),
+    id: sanitizeTagId(id).toUpperCase(),
     hops: toIntOrNull('hops'),
     waveCount: toIntOrNull('waveCount'),
     rssi,
@@ -168,9 +185,14 @@ export function parseLogText(fullText, unitId) {
     const total = totalMatch ? parseInt(totalMatch[1], 10) : 0;
 
     const tagSectionMatch = body.match(TAG_SECTION_RE);
-    const tags = tagSectionMatch ? parseTagSection(tagSectionMatch[1]) : [];
+    const tags = tagSectionMatch ? parseTagSection(tagSectionMatch[3]) : [];
+    // e.g. "Tag Discovery (advanced) primary v2.0.1:" -> the reading device's own fw version,
+    // distinct from each tag's own fwVersionPatch reported in the row data.
+    const readerInfoText = tagSectionMatch ? tagSectionMatch[2] : '';
+    const fwMatch = readerInfoText.match(FW_VERSION_RE);
+    const readerFwVersion = fwMatch ? fwMatch[0] : null;
 
-    blocks.push({ ...base, isTimeout: false, tags, total });
+    blocks.push({ ...base, isTimeout: false, tags, total, readerFwVersion });
   }
 
   return blocks;

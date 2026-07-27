@@ -1,4 +1,12 @@
-import { formatPerDeviceTotals } from './utils.js';
+function formatDeviceBreakdown(session) {
+  const lines = session.involvedUnitIds.map((unitId) => {
+    const fw = session.perDeviceFwVersion[unitId] || 'unknown';
+    const count = session.perDeviceTotals[unitId];
+    return `${unitId},${fw}:${count}`;
+  });
+  lines.push(`Combined -> ${session.total}`);
+  return lines.join('\n');
+}
 
 function lpad(str, width) {
   str = String(str);
@@ -26,7 +34,7 @@ const COLUMN_DEFS = [
 
 export function formatSessionMessage(session) {
   const header = `🏷 <b>Tag Discovery — ${session.time} (${session.date})</b>\n` +
-    `<i>Per-device: ${formatPerDeviceTotals(session.perDeviceTotals)} → Combined unique: ${session.total}</i>\n\n`;
+    `<pre>${formatDeviceBreakdown(session)}</pre>\n\n`;
 
   const activeCols = COLUMN_DEFS.filter(
     (c) => c.always || session.tags.some((t) => c.get(t) !== null && c.get(t) !== undefined)
