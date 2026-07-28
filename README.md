@@ -50,12 +50,19 @@ known column order.
   whole round is discarded (all devices) and a warning is sent instead of data.
 - **`/start` menu**:
   - 📋 Last 4h / Last 24h Raw Discovery Data — full per-session tag tables.
+    Raw views also append any **missing tags** (seen in the last
+    `LIVE_WINDOW_HOURS` but not in the last `MISSING_THRESHOLD_HOURS`).
   - 📊 3-Day / 7-Day Summary — grouped by day, showing **total
     discoveries that day**, **combined unique tag count per discovery**
     (deduped across all devices) alongside each device's own count, plus the
     day's full unique-tag roll-up.
-  - 📈 Battery Chart — QuickChart image.
+  - 🔍 Missing Tags — same list on demand.
+  - 📍 Query Tag GPS — prompts for a 4-char tag ID and returns its last known
+    GPS fix as a Google Maps link.
+  - 📈 Battery Chart / Battery Chart (Filter) — full-fleet chart, or a chart
+    restricted to typed 4-char tag IDs.
   - ✅/❌ Opt in/out of live push updates.
+- **Text commands**: `/battery ID [ID ...]`, `/gps ID`, `/missing`.
 
 ## Config (`.env`)
 
@@ -65,9 +72,12 @@ known column order.
   bracket of this many minutes (default 15, e.g. 12:00, 12:15, 12:30, ...).
   Every block that rounds to the same bracket — any device, even multiple
   blocks from the same device — becomes one session.
-- `POLL_INTERVAL_SECONDS` — how often to re-fetch logs (default 300 = 5 min;
-  actual discovery rounds are ~2h apart, so this is just an upper bound on
-  push latency, not a driver of missed data).
+- `POLL_MINUTE` — minute past the hour on which to poll (default 20). Farmranger
+  uploads at :15 past every hour; polling at :20 catches a fresh upload with a
+  small safety margin and no wasted requests.
+- `LIVE_WINDOW_HOURS` / `MISSING_THRESHOLD_HOURS` — a tag counts as "missing"
+  if it was seen in the live window (default 72h) but not in the threshold
+  window (default 8h).
 - `STATE_FILE` — where `lastProcessedTimestamp` is persisted so restarts don't
   resend history.
 - `SUBSCRIBERS_FILE` — where extra opted-in chat IDs are persisted.

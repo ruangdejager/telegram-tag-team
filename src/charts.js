@@ -13,15 +13,30 @@ async function createQuickChart(chartConfig, width = 800, height = 420) {
   return result.url;
 }
 
-export async function sendBatteryChart(bot, chatId, series, subscribed) {
+// filterIds: optional array of tag IDs (uppercase 4-char). When present, chart is
+// restricted to just those tags — useful when the full-fleet chart has too many bars
+// to read on a phone screen.
+export async function sendBatteryChart(bot, chatId, series, subscribed, { filterIds = null, captionSuffix = '' } = {}) {
   const CRITICAL = 3400, WARNING = 3600;
-  const tags = Object.keys(series).map((id) => {
-    const readings = series[id];
-    const latest = readings[readings.length - 1].battery;
-    const colour = latest < CRITICAL ? '#e74c3c' : latest < WARNING ? '#f39c12' : '#2ecc71';
-    return { id, latest, colour };
-  });
+  const allowSet = filterIds ? new Set(filterIds.map((id) => id.toUpperCase())) : null;
+
+  const tags = Object.keys(series)
+    .filter((id) => !allowSet || allowSet.has(id))
+    .map((id) => {
+      const readings = series[id];
+      const latest = readings[readings.length - 1].battery;
+      const colour = latest < CRITICAL ? '#e74c3c' : latest < WARNING ? '#f39c12' : '#2ecc71';
+      return { id, latest, colour };
+    });
   tags.sort((a, b) => a.latest - b.latest);
+
+  if (tags.length === 0) {
+    await bot.sendMessage(chatId, `⚠️ No battery data for the requested tag${filterIds && filterIds.length > 1 ? 's' : ''}.`, {
+      parse_mode: 'HTML',
+      reply_markup: buildInlineKeyboard(subscribed),
+    });
+    return;
+  }
 
   const chartConfig = {
     type: 'bar',
@@ -40,8 +55,11 @@ export async function sendBatteryChart(bot, chatId, series, subscribed) {
 
   try {
     const url = await createQuickChart(chartConfig, 800, 440);
+    const caption = filterIds
+      ? `📈 Battery levels — filter: ${filterIds.join(', ')}${captionSuffix}`
+      : `📈 Battery levels — sorted worst to best${captionSuffix}`;
     await bot.sendPhoto(chatId, url, {
-      caption: '📈 Battery levels — sorted worst to best',
+      caption,
       parse_mode: 'HTML',
       reply_markup: buildInlineKeyboard(subscribed),
     });

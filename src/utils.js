@@ -52,3 +52,24 @@ export function formatPerDeviceTotals(perDeviceTotals) {
     .map(([unitId, count]) => `${shortUnitId(unitId)}:${count}`)
     .join(' ');
 }
+
+// Tag IDs must be exactly 4 printable-ASCII chars. Parses free text (space/comma
+// separated) into a validated, uppercase, unique list; returns { ids, invalid }.
+export function parseTagIdList(input) {
+  const tokens = String(input || '').split(/[\s,]+/).map((t) => t.trim()).filter(Boolean);
+  const ids = [];
+  const invalid = [];
+  const seen = new Set();
+  for (const tok of tokens) {
+    const up = tok.toUpperCase();
+    if (/^[\x21-\x7E]{4}$/.test(up)) {
+      if (!seen.has(up)) {
+        seen.add(up);
+        ids.push(up);
+      }
+    } else {
+      invalid.push(tok);
+    }
+  }
+  return { ids, invalid };
+}

@@ -11,7 +11,12 @@ export const config = {
   telegramBotToken: required('TELEGRAM_BOT_TOKEN'),
   telegramChatId: required('TELEGRAM_CHAT_ID'),
   apiBase: process.env.API_BASE || 'https://api.services.farmrangersa.com/v2/unit/',
-  pollIntervalSeconds: parseInt(process.env.POLL_INTERVAL_SECONDS || '60', 10),
+  // Minute past the hour on which to poll (Farmranger uploads at :15, so :20 is safe).
+  pollMinute: parseInt(process.env.POLL_MINUTE || '20', 10),
+  // Sliding window of history to keep in RAM for missing-tag detection etc.
+  liveWindowHours: parseInt(process.env.LIVE_WINDOW_HOURS || '72', 10),
+  // A tag is "missing" if seen in the liveWindow but not in the last N hours.
+  missingThresholdHours: parseInt(process.env.MISSING_THRESHOLD_HOURS || '8', 10),
   // Discovery timestamps are rounded to the nearest bracket of this many minutes;
   // every block (from any device, even repeats from the same device) that rounds
   // to the same bracket is combined into one session.

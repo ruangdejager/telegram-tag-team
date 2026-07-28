@@ -51,14 +51,39 @@ async function pollOnce(bot, state) {
   }
 }
 
+// Farmranger uploads new logs to the server at :15 past every hour, so we poll
+// at :20 past every hour — a small safety margin without wasting per-hour requests.
+// (Discovery rounds themselves may only happen every few hours; the poll cadence
+// is just how often we *check* for a new one.)
+function msUntilNextPollTick(now = new Date()) {
+  const next = new Date(now);
+  next.setMinutes(config.pollMinute, 0, 0);
+  if (next <= now) next.setHours(next.getHours() + 1);
+  return next.getTime() - now.getTime();
+}
+
+function scheduleNextTick(bot, state) {
+  const delayMs = msUntilNextPollTick();
+  const fireAt = new Date(Date.now() + delayMs);
+  console.log(`Next poll scheduled for ${fireAt.toISOString()} (in ${Math.round(delayMs / 1000)}s).`);
+  setTimeout(async () => {
+    try {
+      await pollOnce(bot, state);
+    } catch (err) {
+      console.error('Poll cycle failed:', err);
+    }
+    scheduleNextTick(bot, state);
+  }, delayMs);
+}
+
 async function main() {
-  console.log(`Farmranger Tag Bot starting. Units: ${config.unitIds.join(', ')}. Poll interval: ${config.pollIntervalSeconds}s.`);
+  console.log(`Farmranger Tag Bot starting. Units: ${config.unitIds.join(', ')}. Polling at :${String(config.pollMinute).padStart(2, '0')} past every hour.`);
   const bot = createBot();
   const state = loadState();
 
-  const tick = () => pollOnce(bot, state).catch((err) => console.error('Poll cycle failed:', err));
-  await tick();
-  setInterval(tick, config.pollIntervalSeconds * 1000);
+  // Run once on startup to catch anything missed since last shutdown, then align to schedule.
+  await pollOnce(bot, state).catch((err) => console.error('Startup poll failed:', err));
+  scheduleNextTick(bot, state);
 }
 
 main().catch((err) => {

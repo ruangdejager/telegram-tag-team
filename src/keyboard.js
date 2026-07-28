@@ -9,7 +9,14 @@ export function buildInlineKeyboard(subscribed) {
         { text: '📊 3-Day Summary', callback_data: 'hist_3d' },
         { text: '📊 7-Day Summary', callback_data: 'hist_7d' },
       ],
-      [{ text: '📈 Battery Chart', callback_data: 'analytics_batt_chart' }],
+      [
+        { text: '🔍 Missing Tags', callback_data: 'missing_tags' },
+        { text: '📍 Query Tag GPS', callback_data: 'gps_prompt' },
+      ],
+      [
+        { text: '📈 Battery Chart', callback_data: 'analytics_batt_chart' },
+        { text: '📈 Battery Chart (Filter)', callback_data: 'batt_chart_filter' },
+      ],
       [
         subscribed
           ? { text: '❌ Opt Out of Live Updates', callback_data: 'optout' }
