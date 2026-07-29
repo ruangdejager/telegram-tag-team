@@ -77,7 +77,9 @@ async function handleCallbackQuery(bot, query) {
   // Any button press cancels a prior text-input prompt.
   pendingByChat.delete(chatId);
 
-  if (data === 'hist_4h') {
+  if (data === 'hist_latest') {
+    await sendLatestRawDiscovery(bot, chatId, subscribed);
+  } else if (data === 'hist_4h') {
     await sendRawDiscoveryData(bot, chatId, subscribed, 4, 'last 4 hours');
   } else if (data === 'hist_24h') {
     await sendRawDiscoveryData(bot, chatId, subscribed, 24, 'last 24 hours');
@@ -103,6 +105,19 @@ async function handleCallbackQuery(bot, query) {
     optOut(chatId);
     await sendWithButtons(bot, chatId, '❌ You have unsubscribed from live updates.', false);
   }
+}
+
+async function sendLatestRawDiscovery(bot, chatId, subscribed) {
+  // Same 72h window as the raw views so missing-tag detection uses the same evidence,
+  // then pick just the newest session for display.
+  const allSessions = await fetchHistorySessions({ hoursBack: config.liveWindowHours });
+  const latest = allSessions.at(-1);
+  if (!latest) {
+    await sendWithButtons(bot, chatId, `ℹ️ No tag discoveries in the last ${config.liveWindowHours} hours.`, subscribed);
+    return;
+  }
+  const missingSuffix = formatMissingTagsInline(findMissingTags(allSessions, new Date()));
+  await sendWithButtons(bot, chatId, formatSessionMessage(latest) + missingSuffix, subscribed);
 }
 
 async function sendRawDiscoveryData(bot, chatId, subscribed, hoursBack, label) {

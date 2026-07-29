@@ -2,6 +2,7 @@ export function buildInlineKeyboard(subscribed) {
   return {
     inline_keyboard: [
       [
+        { text: '📋 Last Discovery', callback_data: 'hist_latest' },
         { text: '📋 Last 4h Raw Discovery Data', callback_data: 'hist_4h' },
         { text: '📋 Last 24h Raw Discovery Data', callback_data: 'hist_24h' },
       ],
