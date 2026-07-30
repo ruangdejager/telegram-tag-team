@@ -53,7 +53,11 @@ export function formatPerDeviceTotals(perDeviceTotals) {
     .join(' ');
 }
 
-// Tag IDs must be exactly 4 printable-ASCII chars. Parses free text (space/comma
+// Tag IDs are at most 4 raw bytes, but sanitizeTagId (logParser.js) strips any
+// leading/trailing non-printable byte — so a real, already-sanitized ID can be
+// shorter than 4 chars (e.g. 'D1E' when the true 4-byte ID had a non-printable
+// lead byte). Accept 1-4 printable-ASCII chars here to match what's actually
+// stored, not the nominal 4-byte length. Parses free text (space/comma
 // separated) into a validated, uppercase, unique list; returns { ids, invalid }.
 export function parseTagIdList(input) {
   const tokens = String(input || '').split(/[\s,]+/).map((t) => t.trim()).filter(Boolean);
@@ -62,7 +66,7 @@ export function parseTagIdList(input) {
   const seen = new Set();
   for (const tok of tokens) {
     const up = tok.toUpperCase();
-    if (/^[\x21-\x7E]{4}$/.test(up)) {
+    if (/^[\x21-\x7E]{1,4}$/.test(up)) {
       if (!seen.has(up)) {
         seen.add(up);
         ids.push(up);

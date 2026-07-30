@@ -91,13 +91,13 @@ async function handleCallbackQuery(bot, query) {
     await runMissingTags(bot, chatId, subscribed);
   } else if (data === 'gps_prompt') {
     pendingByChat.set(chatId, { action: 'gps' });
-    await sendMessage(bot, chatId, '📍 Send the 4-character tag ID you want the last GPS location for (e.g. <code>3E1E</code>). Or use <code>/gps 3E1E</code>.');
+    await sendMessage(bot, chatId, '📍 Send the tag ID you want the last GPS location for (e.g. <code>3E1E</code>). Or use <code>/gps 3E1E</code>.');
   } else if (data === 'analytics_batt_chart') {
     const sessions = await fetchHistorySessions({});
     await sendBatteryChart(bot, chatId, buildTagSeries(sessions), subscribed);
   } else if (data === 'batt_chart_filter') {
     pendingByChat.set(chatId, { action: 'batt_filter' });
-    await sendMessage(bot, chatId, '🔎 Send one or more 4-character tag IDs (space or comma separated) to chart. E.g. <code>3E1E 441F</code>. Or use <code>/battery 3E1E 441F</code>.');
+    await sendMessage(bot, chatId, '🔎 Send one or more tag IDs (space or comma separated) to chart. E.g. <code>3E1E 441F</code>. Or use <code>/battery 3E1E 441F</code>.');
   } else if (data === 'optin') {
     optIn(chatId);
     await sendWithButtons(bot, chatId, '✅ You are now subscribed to live tag discovery updates.', true);
@@ -166,10 +166,10 @@ async function runMissingTags(bot, chatId, subscribed) {
 async function runBatteryFilter(bot, chatId, subscribed, rawInput) {
   const { ids, invalid } = parseTagIdList(rawInput);
   if (invalid.length > 0) {
-    await sendMessage(bot, chatId, `⚠️ Ignoring invalid tag ID${invalid.length > 1 ? 's' : ''}: <code>${invalid.map((s) => s.replace(/</g, '&lt;')).join(', ')}</code> (must be 4 printable-ASCII chars).`);
+    await sendMessage(bot, chatId, `⚠️ Ignoring invalid tag ID${invalid.length > 1 ? 's' : ''}: <code>${invalid.map((s) => s.replace(/</g, '&lt;')).join(', ')}</code> (must be 1-4 printable-ASCII chars, no spaces).`);
   }
   if (ids.length === 0) {
-    await sendWithButtons(bot, chatId, '⚠️ No valid tag IDs given. Send 4-character IDs, e.g. <code>3E1E 441F</code>.', subscribed);
+    await sendWithButtons(bot, chatId, '⚠️ No valid tag IDs given. Send tag IDs, e.g. <code>3E1E 441F</code>.', subscribed);
     return;
   }
   const sessions = await fetchHistorySessions({});
@@ -181,8 +181,8 @@ async function runGpsLookup(bot, chatId, subscribed, rawInput) {
   const { ids, invalid } = parseTagIdList(rawInput);
   if (ids.length === 0) {
     const hint = invalid.length > 0
-      ? `⚠️ <code>${invalid[0].replace(/</g, '&lt;')}</code> isn't a valid tag ID (must be 4 printable-ASCII chars).`
-      : '⚠️ Send a 4-character tag ID, e.g. <code>3E1E</code>.';
+      ? `⚠️ <code>${invalid[0].replace(/</g, '&lt;')}</code> isn't a valid tag ID (must be 1-4 printable-ASCII chars, no spaces).`
+      : '⚠️ Send a tag ID, e.g. <code>3E1E</code>.';
     await sendWithButtons(bot, chatId, hint, subscribed);
     return;
   }
