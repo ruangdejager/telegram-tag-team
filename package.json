@@ -9,7 +9,8 @@
     "dev": "node --watch src/index.js",
     "test:parse": "node scripts/testParse.js",
     "test:analytics": "node scripts/testAnalytics.js",
-    "test:modes": "node scripts/testModes.js"
+    "test:modes": "node scripts/testModes.js",
+    "test:retry": "node scripts/testRetryTimeout.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

@@ -2,9 +2,10 @@
 
 Polls Farmranger unit logs for one or more devices, merges same-round discovery
 blocks across devices into a single session, and pushes new unique tag
-discoveries to Telegram. If any device reports a `LOG TIMEOUT` for a round,
-that entire round is discarded across all devices and a warning is sent
-instead.
+discoveries to Telegram. Devices retry after a `LOG TIMEOUT` and often succeed
+a few seconds later — a timed-out block is simply excluded in favor of a
+successful retry in the same round; only if *no* device produced a usable
+reading is the round discarded and flagged.
 
 Also has a `/start` menu (inline buttons) for on-demand queries: raw 4h/24h
 data, 3-day/7-day daily summaries, a battery chart, and opt-in/out of live
@@ -21,10 +22,10 @@ npm start
 
 Then in Telegram, message the bot `/start` to see the menu.
 
-`npm run test:parse`, `npm run test:analytics`, and `npm run test:modes` run
-the parser/merger/report formatters against fixtures in `test/fixtures/`
-without touching the network — useful for checking log-format changes before
-pointing at the real API.
+`npm run test:parse`, `npm run test:analytics`, `npm run test:modes`, and
+`npm run test:retry` run the parser/merger/report formatters against fixtures
+in `test/fixtures/` without touching the network — useful for checking
+log-format changes before pointing at the real API.
 
 ### Log format
 
@@ -46,8 +47,14 @@ known column order.
 
 - **Live push**: every new merged discovery session is sent to all subscribers
   (admin chat + anyone who tapped "Opt In") as soon as it's detected.
-- **LOG TIMEOUT handling**: if any device's block for a round is a timeout, the
-  whole round is discarded (all devices) and a warning is sent instead of data.
+- **LOG TIMEOUT handling**: a device that times out often retries and succeeds
+  a few seconds later in the same round — the failed block is simply excluded
+  and the successful retry is used. Only when *no* device produced a usable
+  reading for the round is it discarded and a warning sent instead of data.
+- **Discovery duration**: shown as `Discovery took Ns` on every session,
+  assuming the round started exactly at its 15-minute bracket boundary
+  (`MERGE_BRACKET_MINUTES`) — the longest time any one device took to produce
+  its successful reading.
 - **`/start` menu**:
   - 📋 Last 4h / Last 24h Raw Discovery Data — full per-session tag tables.
     Raw views also append any **missing tags** (seen in the last

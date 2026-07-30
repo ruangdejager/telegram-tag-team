@@ -34,6 +34,7 @@ const COLUMN_DEFS = [
 
 export function formatSessionMessage(session) {
   const header = `🏷 <b>Tag Discovery — ${session.time} (${session.date})</b>\n` +
+    `<i>Discovery took ${session.durationSeconds}s</i>\n` +
     `<pre>${formatDeviceBreakdown(session)}</pre>\n\n`;
 
   const activeCols = COLUMN_DEFS.filter(
