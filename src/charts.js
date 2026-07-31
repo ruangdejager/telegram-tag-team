@@ -108,6 +108,9 @@ export async function sendBatteryTrendChart(bot, chatId, series, subscribed, tag
       backgroundColor: colour,
       fill: false,
       tension: 0.15,
+      borderWidth: 1.5,
+      pointRadius: 0,
+      pointHoverRadius: 3,
     };
   });
 
