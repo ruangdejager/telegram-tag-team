@@ -1,16 +1,20 @@
 # Farmranger Tag Bot
 
-Polls Farmranger unit logs for one or more devices, merges same-round discovery
-blocks across devices into a single session, and pushes new unique tag
-discoveries to Telegram. Devices retry after a `LOG TIMEOUT` and often succeed
-a few seconds later — a timed-out block is simply excluded in favor of a
-successful retry in the same round; only if *no* device produced a usable
-reading is the round discarded and flagged.
+Runs **one or more Telegram bots from a single process**, each with its own bot
+token and its own set of device IMEIs. For each bot, it polls its units'
+Farmranger logs, merges same-round discovery blocks across those devices into a
+single session, and pushes new unique tag discoveries to that bot's Telegram
+subscribers. Devices retry after a `LOG TIMEOUT` and often succeed a few seconds
+later — a timed-out block is simply excluded in favor of a successful retry in
+the same round; only if *no* device produced a usable reading is the round
+discarded and flagged.
 
-Also has a `/start` menu (inline buttons) for on-demand queries: raw 4h/24h
-data, 3-day/7-day daily summaries, a battery chart, and opt-in/out of live
-push updates. History never reaches earlier than `HISTORY_START` (device data
-isn't valid before then).
+Each bot has a **level**: `dev` (full technical insight) or `client` (a reduced,
+non-technical view — see *Bots, levels & the manager bot* below). Bots are added
+and managed live through an owner-only **manager bot** — no redeploy needed.
+
+Every bot has a `/start` menu (inline buttons) for on-demand queries. History
+never reaches earlier than `HISTORY_START` (device data isn't valid before then).
 
 ## Local setup
 
@@ -22,10 +26,16 @@ npm start
 
 Then in Telegram, message the bot `/start` to see the menu.
 
-`npm run test:parse`, `npm run test:analytics`, `npm run test:modes`, and
-`npm run test:retry` run the parser/merger/report formatters against fixtures
-in `test/fixtures/` without touching the network — useful for checking
-log-format changes before pointing at the real API.
+`npm run test:parse`, `test:analytics`, `test:modes`, `test:retry`, and
+`test:client` run the parser/merger/report formatters (including the dev-vs-client
+views) against fixtures in `test/fixtures/` without touching the network — useful
+for checking log-format changes before pointing at the real API.
+
+With no registry yet, the process **seeds one bot from the legacy env vars**
+(`UNIT_IDS`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`) as a `dev` bot named
+`primary`, and migrates any old flat `data/state.json` / `data/subscribers.json`
+into `data/primary/`. After that the registry (`data/registry.json`) is the
+source of truth and those env vars are ignored.
 
 ### Log format
 
@@ -71,48 +81,63 @@ known column order.
     Readings are time-bucketed to stay under QuickChart's data-point limit
     regardless of how often a tag actually reports.
   - ✅/❌ Opt in/out of live push updates.
-- **Text commands**: `/battery ID [ID ...]` (7-day trend chart, one or more
-  tags), `/gps ID`, `/missing`.
+- **Text commands** (dev): `/battery ID [ID ...]` (7-day trend chart, one or
+  more tags), `/gps ID`, `/missing`. On client bots `/battery` is disabled.
 
-## Config (`.env`)
+## Bots, levels & the manager bot
 
-- `UNIT_IDS` — comma-separated device IDs to poll and merge.
-- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` — admin chat, always subscribed.
+Every bot is a registry entry: `{ id, name, token, level, unitIds, adminChatId }`,
+stored in `data/registry.json` on the volume. All bots run in one process and
+share the same hourly poll tick; each keeps its own `lastProcessedTimestamp` and
+subscriber list under `data/<id>/`, so two bots pointing at the same IMEIs push
+independently.
+
+**Levels** change only what a bot shows:
+- `dev` — everything above (full raw tables with RSSI/hops/waves/mov/FW +
+  discovery duration + per-device/IMEI breakdown, daily summaries with per-device
+  columns and the day's tag-ID list, plus the Trend chart).
+- `client` — raw discovery (Latest/4h/24h) and live push show **only Tag ID,
+  Battery mV, GPS Y/N** plus the combined unique total (no FW, no IMEIs, no
+  duration); summaries show **Time + Combined only** (no per-device column, no
+  tag-ID list); the **Trend** feature is removed. Missing, GPS lookup, Battery
+  chart and Opt in/out are unchanged.
+
+**Manager bot** (owner-only) — set `MANAGER_BOT_TOKEN` and `MANAGER_CHAT_ID`. It
+responds *only* to `MANAGER_CHAT_ID` and drives the registry live (no redeploy):
+- `/addbot` — guided: id, name, level, admin chat, IMEIs, then the token (that
+  message is auto-deleted). Starts the new bot immediately.
+- `/listbots`, `/removebot <id>`, `/addimei <id> <imei>`, `/removeimei <id> <imei>`,
+  `/setlevel <id> dev|client` — IMEI/level changes restart just that bot.
+
+## Config (`.env`) — process-global
+
 - `MERGE_BRACKET_MINUTES` — discovery timestamps are rounded to the nearest
-  bracket of this many minutes (default 15, e.g. 12:00, 12:15, 12:30, ...).
-  Every block that rounds to the same bracket — any device, even multiple
-  blocks from the same device — becomes one session.
+  bracket of this many minutes (default 15). Every block that rounds to the same
+  bracket — any device, even repeats from the same device — becomes one session.
 - `POLL_MINUTE` — minute past the hour on which to poll (default 20). Farmranger
-  uploads at :15 past every hour; polling at :20 catches a fresh upload with a
-  small safety margin and no wasted requests.
+  uploads at :15; polling at :20 catches a fresh upload with a small margin.
 - `LIVE_WINDOW_HOURS` / `MISSING_THRESHOLD_HOURS` — a tag counts as "missing"
-  if it was seen in the live window (default 72h) but not in the threshold
-  window (default 8h).
-- `STATE_FILE` — where `lastProcessedTimestamp` is persisted so restarts don't
-  resend history.
-- `SUBSCRIBERS_FILE` — where extra opted-in chat IDs are persisted.
-- `HISTORY_START` — earliest date (ISO, e.g. `2026-06-20`) any history query or
-  chart will look back to, since device data isn't valid before it. Change this
-  if the valid range ever moves — no code change needed, just update the env
-  var (a Railway service variable in production, or `.env` locally) and
-  restart.
+  if seen in the live window (default 72h) but not the threshold window (8h).
+- `HISTORY_START` — earliest date (ISO) any history query/chart reaches.
+- `DATA_DIR` — base dir for `registry.json` and each bot's `data/<id>/` files
+  (use `/data` on Railway).
+- `MANAGER_BOT_TOKEN` / `MANAGER_CHAT_ID` — the manager bot (blank = disabled).
+- Legacy seed (optional): `UNIT_IDS`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
+  (+ optional `LEGACY_BOT_ID`/`_NAME`/`_LEVEL`) seed one bot when the registry
+  is empty; ignored once `registry.json` exists.
 
 ## Deploying to Railway
 
-1. Push this project to a GitHub repo, or `railway init` from this directory.
-2. Set the env vars from above as Railway service variables (do **not** commit
-   `.env`), with `STATE_FILE=/data/state.json` and
-   `SUBSCRIBERS_FILE=/data/subscribers.json`.
-3. **Attach a volume** (required — Railway's container filesystem is wiped on
-   every redeploy/restart otherwise, which would resend the whole day's
-   history and forget subscribers):
-   - Railway dashboard → your service → **Volumes** tab → **New Volume**.
-   - Set **Mount Path** to `/data`.
-   - Redeploy so the service picks up the mounted, persistent `/data`.
-4. `railway up` (or connect the GitHub repo for auto-deploy).
+1. Push to a GitHub repo (or `railway init`).
+2. **Attach a volume** (required — the container filesystem is wiped on every
+   redeploy/restart; the volume holds `registry.json`, so without it every bot,
+   subscriber list and push position is lost): service → **Volumes** →
+   **New Volume** → Mount Path `/data`.
+3. Set service variables: the process-global vars above, `DATA_DIR=/data`, and
+   `MANAGER_BOT_TOKEN`/`MANAGER_CHAT_ID`. For the very first bot you can either
+   set the legacy seed vars or just add it via the manager bot after deploy.
+4. `railway up` (or connect the repo for auto-deploy), then use the manager bot
+   to add your bots.
 
-With the volume attached, `lastProcessedTimestamp` and the subscriber list
-survive restarts, redeploys, and crashes — the bot picks up exactly where it
-left off instead of replaying history or losing opt-ins.
-
-No webhook or public URL is needed — the bot uses Telegram long polling.
+No webhook or public URL is needed — every bot uses Telegram long polling, and
+each bot (and the manager) has its own token so they never conflict.

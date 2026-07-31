@@ -1,4 +1,4 @@
-import { config } from './config.js';
+import { appConfig } from './config.js';
 import { epochToJhb } from './utils.js';
 
 // Merges discovery blocks from one or more devices into "sessions": a single
@@ -17,7 +17,7 @@ import { epochToJhb } from './utils.js';
 // and often succeed a few seconds later within the same bracket — only if a
 // bracket has *no* successful block at all (from any device) is the whole
 // session discarded and flagged so the caller can notify Telegram.
-export function mergeSessions(blocksByUnit, bracketMinutes = config.mergeBracketMinutes) {
+export function mergeSessions(blocksByUnit, bracketMinutes = appConfig.mergeBracketMinutes) {
   const bracketMs = bracketMinutes * 60 * 1000;
   const all = Object.values(blocksByUnit).flat().filter((b) => b.timestamp);
 

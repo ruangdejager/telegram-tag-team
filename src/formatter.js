@@ -1,3 +1,5 @@
+import { formatPerDeviceTotals } from './utils.js';
+
 function formatDeviceBreakdown(session) {
   const lines = session.involvedUnitIds.map((unitId) => {
     const fw = session.perDeviceFwVersion[unitId] || 'unknown';
@@ -20,24 +22,32 @@ function dashes(n) {
 
 // Column presence varies by discovery mode (advanced has Hops/Waves, basic doesn't;
 // fw version may or may not be reported) — each optional column is only shown if at
-// least one tag in the session actually has a value for it.
+// least one tag in the session actually has a value for it. `clientSafe` marks the
+// only columns a client-level bot is allowed to see (Tag ID, Battery mV, GPS Y/N).
 const COLUMN_DEFS = [
-  { label: 'Tag ID', width: 6, always: true, get: (t) => t.id },
+  { label: 'Tag ID', width: 6, always: true, clientSafe: true, get: (t) => t.id },
   { label: 'Hops', width: 4, get: (t) => t.hops },
   { label: 'RSSI', width: 6, always: true, get: (t) => t.rssi },
-  { label: 'Batt', width: 6, always: true, get: (t) => t.battery },
+  { label: 'Batt', width: 6, always: true, clientSafe: true, get: (t) => t.battery },
   { label: 'Waves', width: 5, get: (t) => t.waveCount },
   { label: 'Mov', width: 4, get: (t) => t.movementState },
-  { label: 'GPS', width: 4, always: true, get: (t) => (t.hasGps ? 'Y' : 'N') },
+  { label: 'GPS', width: 4, always: true, clientSafe: true, get: (t) => (t.hasGps ? 'Y' : 'N') },
   { label: 'FW', width: 5, get: (t) => t.fwVersionPatch },
 ];
 
-export function formatSessionMessage(session) {
-  const header = `🏷 <b>Tag Discovery — ${session.time} (${session.date})</b>\n` +
-    `<i>Discovery took ${session.durationSeconds}s</i>\n` +
-    `<pre>${formatDeviceBreakdown(session)}</pre>\n\n`;
+export function formatSessionMessage(session, level = 'dev') {
+  const isClient = level === 'client';
 
-  const activeCols = COLUMN_DEFS.filter(
+  // Client sees only the round's time and the combined unique total — no per-device /
+  // IMEI breakdown and no discovery duration.
+  const header = isClient
+    ? `🏷 <b>Tag Discovery — ${session.time} (${session.date})</b>\n\n`
+    : `🏷 <b>Tag Discovery — ${session.time} (${session.date})</b>\n` +
+      `<i>Discovery took ${session.durationSeconds}s</i>\n` +
+      `<pre>${formatDeviceBreakdown(session)}</pre>\n\n`;
+
+  const candidateCols = isClient ? COLUMN_DEFS.filter((c) => c.clientSafe) : COLUMN_DEFS;
+  const activeCols = candidateCols.filter(
     (c) => c.always || session.tags.some((t) => c.get(t) !== null && c.get(t) !== undefined)
   );
   const div = activeCols.map((c) => dashes(c.width)).join('-+-');
@@ -67,7 +77,14 @@ export function formatSessionMessage(session) {
   return full;
 }
 
-export function formatTimeoutAlert(session) {
+export function formatTimeoutAlert(session, level = 'dev') {
+  // Client sees a generic notice without device (IMEI) identifiers.
+  if (level === 'client') {
+    return (
+      `⚠️ <b>Discovery skipped</b>\n\n` +
+      `The discovery round around <b>${session.timestamp}</b> was skipped due to a device error and has been dropped.`
+    );
+  }
   return (
     `⚠️ <b>LOG TIMEOUT detected</b>\n\n` +
     `Session around <b>${session.timestamp}</b> was discarded because unit(s) ` +

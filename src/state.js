@@ -1,21 +1,27 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { config } from './config.js';
+import { appConfig } from './config.js';
 
 const DEFAULT_STATE = { lastProcessedTimestamp: null };
 
-export function loadState() {
-  try {
-    const raw = fs.readFileSync(config.stateFile, 'utf8');
-    return { ...DEFAULT_STATE, ...JSON.parse(raw) };
-  } catch (err) {
-    if (err.code !== 'ENOENT') console.error('Failed to read state file, starting fresh:', err.message);
-    return { ...DEFAULT_STATE };
-  }
-}
+// Per-bot state store. Each bot tracks its own lastProcessedTimestamp so two bots
+// pointing at the same IMEIs still push independently.
+export function createStateStore(botId) {
+  const file = path.join(appConfig.dataDir, botId, 'state.json');
 
-export function saveState(state) {
-  const dir = path.dirname(config.stateFile);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(config.stateFile, JSON.stringify(state, null, 2));
+  function load() {
+    try {
+      return { ...DEFAULT_STATE, ...JSON.parse(fs.readFileSync(file, 'utf8')) };
+    } catch (err) {
+      if (err.code !== 'ENOENT') console.error(`[${botId}] Failed to read state file, starting fresh:`, err.message);
+      return { ...DEFAULT_STATE };
+    }
+  }
+
+  function save(state) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(state, null, 2));
+  }
+
+  return { file, load, save };
 }

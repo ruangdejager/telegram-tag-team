@@ -1,4 +1,4 @@
-import { config } from './config.js';
+import { appConfig } from './config.js';
 
 // Farmranger API expects local Africa/Johannesburg wall-clock time (fixed UTC+2, no DST),
 // same as the original Apps Script (TZ 'Africa/Johannesburg'). We must compute this
@@ -19,7 +19,7 @@ function toJhbParts(d) {
 // Mirrors the old Apps Script buildApiUrl: from = start of day (or override), to = now.
 export function buildApiUrl(unitId, now, fromOverride) {
   const from = fromOverride ?? startOfDay(now);
-  return `${config.apiBase}${unitId}/logs?From=${toApiDate(from)}&To=${toApiDate(now)}`;
+  return `${appConfig.apiBase}${unitId}/logs?From=${toApiDate(from)}&To=${toApiDate(now)}`;
 }
 
 function startOfDay(d) {

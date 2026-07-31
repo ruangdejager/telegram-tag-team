@@ -1,58 +1,60 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { config } from './config.js';
+import { appConfig } from './config.js';
 
-// Extra opted-in chat IDs, in addition to the fixed admin chat (config.telegramChatId,
-// which is always subscribed). Loaded once into memory at startup and persisted to disk
-// on every mutation — fine for a single bot process.
-let extraSubscribers = [];
+// Per-bot subscriber store. The admin chat (the bot's own adminChatId) is always
+// subscribed; extra chat IDs opt in/out and are persisted to the bot's own file.
+export function createSubscriberStore(botId, adminChatId) {
+  const file = path.join(appConfig.dataDir, botId, 'subscribers.json');
+  const admin = adminChatId ? String(adminChatId) : null;
+  let extra = [];
 
-export function loadSubscribers() {
-  try {
-    const raw = fs.readFileSync(config.subscribersFile, 'utf8');
-    extraSubscribers = JSON.parse(raw);
-  } catch (err) {
-    if (err.code !== 'ENOENT') console.error('Failed to read subscribers file, starting fresh:', err.message);
-    extraSubscribers = [];
+  function load() {
+    try {
+      extra = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch (err) {
+      if (err.code !== 'ENOENT') console.error(`[${botId}] Failed to read subscribers file, starting fresh:`, err.message);
+      extra = [];
+    }
+    return extra;
   }
-  return extraSubscribers;
-}
 
-function persist() {
-  const dir = path.dirname(config.subscribersFile);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(config.subscribersFile, JSON.stringify(extraSubscribers, null, 2));
-}
-
-export function isOptedIn(chatId) {
-  chatId = String(chatId);
-  if (chatId === String(config.telegramChatId)) return true;
-  return extraSubscribers.includes(chatId);
-}
-
-export function optIn(chatId) {
-  chatId = String(chatId);
-  if (!extraSubscribers.includes(chatId)) {
-    extraSubscribers.push(chatId);
-    persist();
+  function persist() {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(extra, null, 2));
   }
-}
 
-export function optOut(chatId) {
-  chatId = String(chatId);
-  extraSubscribers = extraSubscribers.filter((id) => id !== chatId);
-  persist();
-}
+  function isOptedIn(chatId) {
+    chatId = String(chatId);
+    if (admin && chatId === admin) return true;
+    return extra.includes(chatId);
+  }
 
-// All chat IDs that should receive live discovery pushes.
-export function getRecipients() {
-  const seen = new Set();
-  const result = [];
-  for (const id of [String(config.telegramChatId), ...extraSubscribers]) {
-    if (!seen.has(id)) {
-      seen.add(id);
-      result.push(id);
+  function optIn(chatId) {
+    chatId = String(chatId);
+    if (!extra.includes(chatId)) {
+      extra.push(chatId);
+      persist();
     }
   }
-  return result;
+
+  function optOut(chatId) {
+    chatId = String(chatId);
+    extra = extra.filter((id) => id !== chatId);
+    persist();
+  }
+
+  function getRecipients() {
+    const seen = new Set();
+    const result = [];
+    for (const id of [...(admin ? [admin] : []), ...extra]) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        result.push(id);
+      }
+    }
+    return result;
+  }
+
+  return { file, load, isOptedIn, optIn, optOut, getRecipients };
 }

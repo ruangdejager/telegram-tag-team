@@ -1,12 +1,12 @@
-import { config } from './config.js';
+import { appConfig } from './config.js';
 
 // A tag is "missing" if it was seen inside the live window (default 72h) but hasn't
 // been seen in the recent-threshold window (default 8h). This gives an early-warning
 // signal that a tag we know exists on the farm has fallen off the network — likely
 // low battery or out of range — without noise from tags that were never here.
 export function findMissingTags(sessions, now = new Date(), {
-  windowHours = config.liveWindowHours,
-  thresholdHours = config.missingThresholdHours,
+  windowHours = appConfig.liveWindowHours,
+  thresholdHours = appConfig.missingThresholdHours,
 } = {}) {
   const nowMs = now.getTime();
   const windowStart = nowMs - windowHours * 60 * 60 * 1000;
@@ -34,7 +34,7 @@ export function findMissingTags(sessions, now = new Date(), {
   return missing;
 }
 
-export function formatMissingTags(missing, { thresholdHours = config.missingThresholdHours, windowHours = config.liveWindowHours } = {}) {
+export function formatMissingTags(missing, { thresholdHours = appConfig.missingThresholdHours, windowHours = appConfig.liveWindowHours } = {}) {
   if (missing.length === 0) {
     return `✅ <b>No missing tags.</b>\nAll tags seen in the last ${windowHours}h have also been seen in the last ${thresholdHours}h.`;
   }
@@ -49,7 +49,7 @@ export function formatMissingTags(missing, { thresholdHours = config.missingThre
 }
 
 // Compact list for appending inline at the end of a raw-discovery view.
-export function formatMissingTagsInline(missing, { thresholdHours = config.missingThresholdHours } = {}) {
+export function formatMissingTagsInline(missing, { thresholdHours = appConfig.missingThresholdHours } = {}) {
   if (missing.length === 0) return '';
   const ids = missing.map((m) => m.id).sort().join(' ');
   return `\n<i>⚠️ Missing (not seen in last ${thresholdHours}h): ${ids}</i>`;

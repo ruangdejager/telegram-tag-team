@@ -16,14 +16,14 @@ async function createQuickChart(chartConfig, width = 800, height = 420) {
   return result.url;
 }
 
-async function sendChartOrError(bot, chatId, subscribed, chartConfig, caption, { width = 800, height = 440 } = {}) {
+async function sendChartOrError(bot, chatId, subscribed, chartConfig, caption, { width = 800, height = 440, level = 'dev' } = {}) {
   try {
     const url = await createQuickChart(chartConfig, width, height);
-    await bot.sendPhoto(chatId, url, { caption, parse_mode: 'HTML', reply_markup: buildInlineKeyboard(subscribed) });
+    await bot.sendPhoto(chatId, url, { caption, parse_mode: 'HTML', reply_markup: buildInlineKeyboard(subscribed, level) });
   } catch (err) {
     await bot.sendMessage(chatId, `⚠️ Chart unavailable — try again in a moment.\n\n${err.message}`, {
       parse_mode: 'HTML',
-      reply_markup: buildInlineKeyboard(subscribed),
+      reply_markup: buildInlineKeyboard(subscribed, level),
     });
   }
 }
@@ -31,7 +31,7 @@ async function sendChartOrError(bot, chatId, subscribed, chartConfig, caption, {
 // Full-fleet snapshot: one horizontal bar per tag (so every ID gets its own row and stays
 // readable regardless of fleet size, instead of squeezing rotated labels into a fixed
 // width), latest reading, sorted worst to best.
-export async function sendBatteryChart(bot, chatId, series, subscribed) {
+export async function sendBatteryChart(bot, chatId, series, subscribed, level = 'dev') {
   const CRITICAL = 3400, WARNING = 3600;
   const tags = Object.keys(series).map((id) => {
     const readings = series[id];
@@ -63,14 +63,14 @@ export async function sendBatteryChart(bot, chatId, series, subscribed) {
   // Height grows with the tag count so every row has room; width stays fixed since
   // labels are horizontal and never need to compete for space with each other.
   const height = Math.max(440, 60 + tags.length * 24);
-  await sendChartOrError(bot, chatId, subscribed, chartConfig, '📈 Battery levels — sorted worst to best', { width: 800, height });
+  await sendChartOrError(bot, chatId, subscribed, chartConfig, '📈 Battery levels — sorted worst to best', { width: 800, height, level });
 }
 
 // Battery-over-time line plot for one or more specific tags, over the given window.
 // Readings are bucketed by time (keeping only the latest reading per bucket) so the
 // point count stays bounded regardless of how often a tag actually reports — QuickChart's
 // free tier rejects requests over a few hundred data points.
-export async function sendBatteryTrendChart(bot, chatId, series, subscribed, tagIds, { windowDays = 7, maxPoints = 120 } = {}) {
+export async function sendBatteryTrendChart(bot, chatId, series, subscribed, tagIds, { windowDays = 7, maxPoints = 120, level = 'dev' } = {}) {
   const nowMs = Date.now();
   const windowMs = windowDays * 24 * 60 * 60 * 1000;
   const cutoffMs = nowMs - windowMs;
@@ -95,7 +95,7 @@ export async function sendBatteryTrendChart(bot, chatId, series, subscribed, tag
   if (bucketEpochs.length === 0) {
     await bot.sendMessage(chatId, `⚠️ No battery data for <b>${tagIds.join(', ')}</b> in the last ${windowDays} days.`, {
       parse_mode: 'HTML',
-      reply_markup: buildInlineKeyboard(subscribed),
+      reply_markup: buildInlineKeyboard(subscribed, level),
     });
     return;
   }
@@ -135,5 +135,5 @@ export async function sendBatteryTrendChart(bot, chatId, series, subscribed, tag
     },
   };
 
-  await sendChartOrError(bot, chatId, subscribed, chartConfig, `📉 Battery trend (${windowDays}d) — ${tagIds.join(', ')}`);
+  await sendChartOrError(bot, chatId, subscribed, chartConfig, `📉 Battery trend (${windowDays}d) — ${tagIds.join(', ')}`, { level });
 }
