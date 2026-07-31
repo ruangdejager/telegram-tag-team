@@ -59,7 +59,7 @@ known column order.
   - 📋 Latest / 4h / 24h — raw per-session tag tables. Raw views also append
     any **missing tags** (seen in the last `LIVE_WINDOW_HOURS` but not in the
     last `MISSING_THRESHOLD_HOURS`).
-  - 📊 3d / 7d — daily summaries, showing **total discoveries that day**,
+  - 📊 1d / 3d / 7d — daily summaries, showing **total discoveries that day**,
     **combined unique tag count per discovery** (deduped across all devices)
     alongside each device's own count, plus the day's full unique-tag roll-up.
   - 🔍 Missing — same missing-tags list on demand.

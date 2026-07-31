@@ -85,6 +85,8 @@ async function handleCallbackQuery(bot, query) {
     await sendRawDiscoveryData(bot, chatId, subscribed, 4, 'last 4 hours');
   } else if (data === 'hist_24h') {
     await sendRawDiscoveryData(bot, chatId, subscribed, 24, 'last 24 hours');
+  } else if (data === 'hist_1d') {
+    await sendDailySummaries(bot, chatId, subscribed, { hoursBack: 24 }, 'last day');
   } else if (data === 'hist_3d') {
     await sendDailySummaries(bot, chatId, subscribed, { hoursBack: 72 }, 'last 3 days');
   } else if (data === 'hist_7d') {

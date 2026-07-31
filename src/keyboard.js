@@ -7,6 +7,7 @@ export function buildInlineKeyboard(subscribed) {
         { text: '📋 24h', callback_data: 'hist_24h' },
       ],
       [
+        { text: '📊 1d', callback_data: 'hist_1d' },
         { text: '📊 3d', callback_data: 'hist_3d' },
         { text: '📊 7d', callback_data: 'hist_7d' },
       ],
