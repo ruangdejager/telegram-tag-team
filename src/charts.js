@@ -28,7 +28,9 @@ async function sendChartOrError(bot, chatId, subscribed, chartConfig, caption, {
   }
 }
 
-// Full-fleet snapshot: one bar per tag, latest reading, sorted worst to best.
+// Full-fleet snapshot: one horizontal bar per tag (so every ID gets its own row and stays
+// readable regardless of fleet size, instead of squeezing rotated labels into a fixed
+// width), latest reading, sorted worst to best.
 export async function sendBatteryChart(bot, chatId, series, subscribed) {
   const CRITICAL = 3400, WARNING = 3600;
   const tags = Object.keys(series).map((id) => {
@@ -46,15 +48,22 @@ export async function sendBatteryChart(bot, chatId, series, subscribed) {
       datasets: [{ label: 'Battery (mV)', data: tags.map((t) => t.latest), backgroundColor: tags.map((t) => t.colour) }],
     },
     options: {
+      indexAxis: 'y',
       plugins: {
         legend: { display: false },
-        title: { display: true, text: 'Tag Battery Levels', font: { size: 16 } },
+        title: { display: true, text: `Tag Battery Levels (${tags.length})`, font: { size: 16 } },
       },
-      scales: { y: { min: 3200, title: { display: true, text: 'mV' } }, x: { ticks: { maxRotation: 45 } } },
+      scales: {
+        x: { min: 3200, title: { display: true, text: 'mV' } },
+        y: { ticks: { autoSkip: false, font: { size: 11 } } },
+      },
     },
   };
 
-  await sendChartOrError(bot, chatId, subscribed, chartConfig, '📈 Battery levels — sorted worst to best');
+  // Height grows with the tag count so every row has room; width stays fixed since
+  // labels are horizontal and never need to compete for space with each other.
+  const height = Math.max(440, 60 + tags.length * 24);
+  await sendChartOrError(bot, chatId, subscribed, chartConfig, '📈 Battery levels — sorted worst to best', { width: 800, height });
 }
 
 // Battery-over-time line plot for one or more specific tags, over the given window.
