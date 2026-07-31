@@ -55,21 +55,24 @@ known column order.
   assuming the round started exactly at its 15-minute bracket boundary
   (`MERGE_BRACKET_MINUTES`) — the longest time any one device took to produce
   its successful reading.
-- **`/start` menu**:
-  - 📋 Last 4h / Last 24h Raw Discovery Data — full per-session tag tables.
-    Raw views also append any **missing tags** (seen in the last
-    `LIVE_WINDOW_HOURS` but not in the last `MISSING_THRESHOLD_HOURS`).
-  - 📊 3-Day / 7-Day Summary — grouped by day, showing **total
-    discoveries that day**, **combined unique tag count per discovery**
-    (deduped across all devices) alongside each device's own count, plus the
-    day's full unique-tag roll-up.
-  - 🔍 Missing Tags — same list on demand.
-  - 📍 Query Tag GPS — prompts for a 4-char tag ID and returns its last known
-    GPS fix as a Google Maps link.
-  - 📈 Battery Chart / Battery Chart (Filter) — full-fleet chart, or a chart
-    restricted to typed 4-char tag IDs.
+- **`/start` menu** (button labels kept short for mobile — full names below):
+  - 📋 Latest / 4h / 24h — raw per-session tag tables. Raw views also append
+    any **missing tags** (seen in the last `LIVE_WINDOW_HOURS` but not in the
+    last `MISSING_THRESHOLD_HOURS`).
+  - 📊 3d / 7d — daily summaries, showing **total discoveries that day**,
+    **combined unique tag count per discovery** (deduped across all devices)
+    alongside each device's own count, plus the day's full unique-tag roll-up.
+  - 🔍 Missing — same missing-tags list on demand.
+  - 📍 GPS — prompts for a tag ID, returns its last known GPS fix as a Google
+    Maps link.
+  - 🔋 Battery — full-fleet snapshot chart (latest reading per tag).
+  - 📉 Trend — prompts for one or more tag IDs, returns a battery-over-time
+    line chart for just those tags over the last 7 days (one line per tag).
+    Readings are time-bucketed to stay under QuickChart's data-point limit
+    regardless of how often a tag actually reports.
   - ✅/❌ Opt in/out of live push updates.
-- **Text commands**: `/battery ID [ID ...]`, `/gps ID`, `/missing`.
+- **Text commands**: `/battery ID [ID ...]` (7-day trend chart, one or more
+  tags), `/gps ID`, `/missing`.
 
 ## Config (`.env`)
 

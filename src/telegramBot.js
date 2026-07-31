@@ -5,16 +5,18 @@ import { fetchHistorySessions } from './history.js';
 import { formatSessionMessage } from './formatter.js';
 import { groupSessionsByDate, formatDailySummary } from './dailySummary.js';
 import { buildTagSeries } from './analytics.js';
-import { sendBatteryChart } from './charts.js';
+import { sendBatteryChart, sendBatteryTrendChart } from './charts.js';
 import { isOptedIn, optIn, optOut, loadSubscribers } from './subscribers.js';
 import { findMissingTags, formatMissingTags, formatMissingTagsInline } from './missingTags.js';
 import { findLatestGpsForTag, findTagLastSeen, formatTagGps } from './tagGps.js';
 import { parseTagIdList } from './utils.js';
 
-// Per-chat conversational state: after the user taps 'Filter Battery Chart' or
-// 'Query Tag GPS', their next plain text message is treated as input for that
-// action. Cleared as soon as we use it (or if they type /start / press any button).
-const pendingByChat = new Map(); // chatId -> { action: 'batt_filter' | 'gps' }
+const BATTERY_TREND_DAYS = 7;
+
+// Per-chat conversational state: after the user taps 'Trend' or 'GPS', their next
+// plain text message is treated as input for that action. Cleared as soon as we
+// use it (or if they type /start / press any button).
+const pendingByChat = new Map(); // chatId -> { action: 'batt_trend' | 'gps' }
 
 export function createBot() {
   loadSubscribers();
@@ -30,7 +32,7 @@ export function createBot() {
 const WELCOME =
   '🐄 <b>Farmranger Tag Monitor</b>\n\n' +
   'Use the buttons below to query tag discovery history, or opt in to receive live updates whenever new tags are detected.\n\n' +
-  'Commands: <code>/battery ID [ID ...]</code>, <code>/gps ID</code>, <code>/missing</code>';
+  `Commands: <code>/battery ID [ID ...]</code> (${BATTERY_TREND_DAYS}d trend), <code>/gps ID</code>, <code>/missing</code>`;
 
 async function handleMessage(bot, message) {
   const chatId = String(message.chat.id);
@@ -44,7 +46,7 @@ async function handleMessage(bot, message) {
   }
   if (text.startsWith('/battery')) {
     const args = text.replace(/^\/battery\s*/i, '');
-    await runBatteryFilter(bot, chatId, subscribed, args);
+    await runBatteryTrend(bot, chatId, subscribed, args);
     return;
   }
   if (text.startsWith('/gps')) {
@@ -61,7 +63,7 @@ async function handleMessage(bot, message) {
   const pending = pendingByChat.get(chatId);
   if (pending) {
     pendingByChat.delete(chatId);
-    if (pending.action === 'batt_filter') return runBatteryFilter(bot, chatId, subscribed, text);
+    if (pending.action === 'batt_trend') return runBatteryTrend(bot, chatId, subscribed, text);
     if (pending.action === 'gps') return runGpsLookup(bot, chatId, subscribed, text);
   }
 
@@ -95,9 +97,9 @@ async function handleCallbackQuery(bot, query) {
   } else if (data === 'analytics_batt_chart') {
     const sessions = await fetchHistorySessions({});
     await sendBatteryChart(bot, chatId, buildTagSeries(sessions), subscribed);
-  } else if (data === 'batt_chart_filter') {
-    pendingByChat.set(chatId, { action: 'batt_filter' });
-    await sendMessage(bot, chatId, '🔎 Send one or more tag IDs (space or comma separated) to chart. E.g. <code>3E1E 441F</code>. Or use <code>/battery 3E1E 441F</code>.');
+  } else if (data === 'batt_trend_prompt') {
+    pendingByChat.set(chatId, { action: 'batt_trend' });
+    await sendMessage(bot, chatId, `📉 Send one or more tag IDs (space/comma separated) for a ${BATTERY_TREND_DAYS}-day trend. E.g. <code>3E1E 441F</code>. Or use <code>/battery 3E1E 441F</code>.`);
   } else if (data === 'optin') {
     optIn(chatId);
     await sendWithButtons(bot, chatId, '✅ You are now subscribed to live tag discovery updates.', true);
@@ -163,7 +165,7 @@ async function runMissingTags(bot, chatId, subscribed) {
   await sendWithButtons(bot, chatId, formatMissingTags(missing), subscribed);
 }
 
-async function runBatteryFilter(bot, chatId, subscribed, rawInput) {
+async function runBatteryTrend(bot, chatId, subscribed, rawInput) {
   const { ids, invalid } = parseTagIdList(rawInput);
   if (invalid.length > 0) {
     await sendMessage(bot, chatId, `⚠️ Ignoring invalid tag ID${invalid.length > 1 ? 's' : ''}: <code>${invalid.map((s) => s.replace(/</g, '&lt;')).join(', ')}</code> (must be 1-4 printable-ASCII chars, no spaces).`);
@@ -172,9 +174,9 @@ async function runBatteryFilter(bot, chatId, subscribed, rawInput) {
     await sendWithButtons(bot, chatId, '⚠️ No valid tag IDs given. Send tag IDs, e.g. <code>3E1E 441F</code>.', subscribed);
     return;
   }
-  const sessions = await fetchHistorySessions({});
+  const sessions = await fetchHistorySessions({ hoursBack: BATTERY_TREND_DAYS * 24 });
   const series = buildTagSeries(sessions);
-  await sendBatteryChart(bot, chatId, series, subscribed, { filterIds: ids });
+  await sendBatteryTrendChart(bot, chatId, series, subscribed, ids, { windowDays: BATTERY_TREND_DAYS });
 }
 
 async function runGpsLookup(bot, chatId, subscribed, rawInput) {
