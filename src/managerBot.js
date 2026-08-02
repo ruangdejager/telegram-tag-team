@@ -20,7 +20,7 @@ export function startManagerBot(botManager) {
 
   const HELP =
     '🛠 <b>Bot Manager</b>\n\n' +
-    '<b>/addbot</b> — guided: add a new bot (id, name, level, admin chat, IMEIs, token)\n' +
+    '<b>/addbot</b> — guided: add a new bot (id, name, level, IMEIs, token)\n' +
     '<b>/listbots</b> — list all bots\n' +
     '<b>/removebot &lt;id&gt;</b> — stop and delete a bot\n' +
     '<b>/addimei &lt;id&gt; &lt;imei&gt;</b>\n' +
@@ -50,7 +50,7 @@ export function startManagerBot(botManager) {
     }
     if (text.startsWith('/addbot')) {
       flows.set(chatId, { data: {} });
-      await send('➕ <b>New bot</b>\n\nStep 1/6 — send a short id (slug), e.g. <code>corbu-dexters</code>:');
+      await send('➕ <b>New bot</b>\n\nStep 1/5 — send a short id (slug), e.g. <code>corbu-dexters</code>:');
       return;
     }
     if (text.startsWith('/listbots')) {
@@ -83,29 +83,32 @@ export function startManagerBot(botManager) {
       if (d.id === undefined) {
         d.id = text.toLowerCase().replace(/[^a-z0-9-]/g, '');
         if (!d.id) throw new Error('That id is empty after cleanup — use letters, numbers, hyphens.');
-        await send(`Step 2/6 — display name for <b>${d.id}</b> (e.g. <code>Corbu Dexters</code>):`);
+        await send(`Step 2/5 — display name for <b>${d.id}</b> (e.g. <code>Corbu Dexters</code>):`);
       } else if (d.name === undefined) {
         d.name = text;
-        await send(`Step 3/6 — level? Reply <code>dev</code> or <code>client</code>:`);
+        await send(`Step 3/5 — level? Reply <code>dev</code> or <code>client</code>:`);
       } else if (d.level === undefined) {
         const level = text.toLowerCase();
         if (!BOT_LEVELS.includes(level)) throw new Error('Level must be dev or client.');
         d.level = level;
-        await send('Step 4/6 — admin chat id (the Telegram chat that is always subscribed for this bot):');
-      } else if (d.adminChatId === undefined) {
-        d.adminChatId = text.trim();
-        await send('Step 5/6 — IMEI(s), comma or space separated:');
+        // No fixed admin chat — every subscriber, including you, opts in from /start
+        // like anyone else. Fine for both dev and client bots on a multi-tenant setup.
+        d.adminChatId = '';
+        await send('Step 4/5 — IMEI(s), comma or space separated:');
       } else if (d.unitIds === undefined) {
         d.unitIds = text.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
         if (d.unitIds.length === 0) throw new Error('No IMEIs found.');
-        await send('Step 6/6 — paste the bot token. ⚠️ This message will be deleted immediately for safety.');
+        await send('Step 5/5 — paste the bot token. ⚠️ This message will be deleted immediately for safety.');
       } else {
         d.token = text.trim();
         // Delete the message that contained the token before doing anything else.
         try { await bot.deleteMessage(chatId, messageId); } catch { /* ignore */ }
         flows.delete(chatId);
         const created = await botManager.addBot(d);
-        await send(`✅ Added <b>${created.name}</b> (<code>${created.id}</code>, ${created.level}) with ${created.unitIds.length} IMEI(s). It is now live.`);
+        await send(
+          `✅ Added <b>${created.name}</b> (<code>${created.id}</code>, ${created.level}) with ${created.unitIds.length} IMEI(s). It is now live.\n\n` +
+          `Nobody is subscribed yet — message the new bot <code>/start</code> and tap <b>✅ Opt In</b> to receive live updates.`
+        );
       }
     } catch (err) {
       await send(`⚠️ ${err.message}\nFix and resend, or /cancel.`);
@@ -120,7 +123,7 @@ export function startManagerBot(botManager) {
     }
     const lines = bots.map((b) =>
       `${b.running ? '🟢' : '🔴'} <b>${b.name}</b> (<code>${b.id}</code>) — ${b.level}\n` +
-      `   admin: <code>${b.adminChatId || '—'}</code>\n` +
+      (b.adminChatId ? `   admin: <code>${b.adminChatId}</code>\n` : '') +
       `   IMEIs: ${b.unitIds.join(', ')}`);
     await send('📋 <b>Bots</b>\n\n' + lines.join('\n\n'));
   }

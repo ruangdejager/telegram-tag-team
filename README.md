@@ -55,8 +55,10 @@ known column order.
 
 ## Features
 
-- **Live push**: every new merged discovery session is sent to all subscribers
-  (admin chat + anyone who tapped "Opt In") as soon as it's detected.
+- **Live push**: every new merged discovery session is sent to everyone who
+  tapped "Opt In" for that bot, as soon as it's detected. No chat is
+  pre-subscribed — every bot starts with zero subscribers, including you;
+  message the bot `/start` and tap Opt In to receive its live updates.
 - **LOG TIMEOUT handling**: a device that times out often retries and succeeds
   a few seconds later in the same round — the failed block is simply excluded
   and the successful retry is used. Only when *no* device produced a usable
@@ -104,8 +106,9 @@ independently.
 
 **Manager bot** (owner-only) — set `MANAGER_BOT_TOKEN` and `MANAGER_CHAT_ID`. It
 responds *only* to `MANAGER_CHAT_ID` and drives the registry live (no redeploy):
-- `/addbot` — guided: id, name, level, admin chat, IMEIs, then the token (that
-  message is auto-deleted). Starts the new bot immediately.
+- `/addbot` — guided: id, name, level, IMEIs, then the token (that message is
+  auto-deleted). Starts the new bot immediately with zero subscribers — message
+  the new bot and tap Opt In to start receiving its updates.
 - `/listbots`, `/removebot <id>`, `/addimei <id> <imei>`, `/removeimei <id> <imei>`,
   `/setlevel <id> dev|client` — IMEI/level changes restart just that bot.
 
