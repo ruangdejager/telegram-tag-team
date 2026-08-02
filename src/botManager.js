@@ -79,5 +79,14 @@ export function createBotManager() {
     }
   }
 
-  return { startAll, addBot, removeBot, addImei, removeImei, setLevel, list, pollAll, hasBot: (id) => runningBots.has(id) };
+  // Stops every running bot's Telegram long-poll. Call this on process shutdown
+  // (SIGTERM/SIGINT) so a redeploy's old container releases its getUpdates
+  // connections before the new container starts polling the same tokens —
+  // otherwise the two briefly fight over the same connection (Telegram 409s).
+  async function stopAll() {
+    await Promise.all([...runningBots.values()].map((runtime) => runtime.stop()));
+    runningBots.clear();
+  }
+
+  return { startAll, addBot, removeBot, addImei, removeImei, setLevel, list, pollAll, stopAll, hasBot: (id) => runningBots.has(id) };
 }

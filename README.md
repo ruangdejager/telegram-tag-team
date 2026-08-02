@@ -144,3 +144,8 @@ responds *only* to `MANAGER_CHAT_ID` and drives the registry live (no redeploy):
 
 No webhook or public URL is needed — every bot uses Telegram long polling, and
 each bot (and the manager) has its own token so they never conflict.
+
+On `SIGTERM`/`SIGINT` (a Railway redeploy sends `SIGTERM` to the old container),
+every bot's long-poll is stopped cleanly before exit — without this, the old and
+new container briefly hold the same Telegram connection open and fight over it
+(repeated 409 errors) until the stale one times out server-side.
