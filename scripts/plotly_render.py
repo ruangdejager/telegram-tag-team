@@ -9,9 +9,19 @@ matters (currently not a hot path).
 """
 import io
 import json
+import os
 import sys
 
-import plotly.io as pio
+# The npm postinstall step (scripts/install-python-deps.mjs) pip-installs plotly
+# + kaleido into <repo>/vendor/python so they land on the same filesystem tree as
+# the Node app and are guaranteed to survive Railpack's build→deploy image handoff.
+# Prepend it to sys.path before importing plotly, so this script works whether the
+# packages are there or in Python's global site-packages (local dev).
+_VENDOR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "vendor", "python"))
+if os.path.isdir(_VENDOR):
+    sys.path.insert(0, _VENDOR)
+
+import plotly.io as pio  # noqa: E402  (import after sys.path tweak, by design)
 
 # Force UTF-8 on stdin regardless of the OS locale — Python on Windows defaults to
 # the console codepage, which mangles non-ASCII chars in figure titles/labels.
