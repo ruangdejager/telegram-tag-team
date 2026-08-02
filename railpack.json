@@ -1,0 +1,22 @@
+{
+  "$schema": "https://schema.railpack.com/latest/schema.json",
+  "packages": {
+    "python": "3.12"
+  },
+  "steps": {
+    "python-plotly": {
+      "commands": [
+        "python -m pip install --break-system-packages --no-cache-dir plotly==5.24.1 kaleido==0.2.1"
+      ],
+      "inputs": [
+        { "step": "packages:mise" }
+      ]
+    }
+  },
+  "deploy": {
+    "inputs": [
+      { "step": "build" },
+      { "step": "python-plotly" }
+    ]
+  }
+}

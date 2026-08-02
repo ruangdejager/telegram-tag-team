@@ -150,8 +150,12 @@ via **Plotly + Kaleido** (Python) — Node shells out to a small script in
 `scripts/plotly_render.py` that reads a Plotly figure JSON from stdin and writes
 a PNG to stdout. Kaleido bundles a headless Chromium for offline export; the
 container is ~200MB larger than a Node-only one as a result. Setup is declared
-in `nixpacks.toml` (Node + Python + `plotly` + `kaleido`) so Railway builds it
-in one step, no Dockerfile required.
+in `railpack.json` (adds Python 3.12 via mise + runs `pip install plotly
+kaleido` as a build step) so Railway's Railpack builder handles it in one step
+with no Dockerfile required. If Railway ever falls back to Nixpacks on your
+service, the same result can be achieved by adding a `nixpacks.toml` with
+`nixPkgs = ["nodejs_20", "python3", "python3Packages.pip"]` and an install
+phase that runs `pip install plotly==5.24.1 kaleido==0.2.1`.
 
 The position map is a **Mapbox Static Images** URL with one coloured pin per
 tag — no Plotly needed for that view. Both position map and heatmap require
