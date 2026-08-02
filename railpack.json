@@ -4,20 +4,11 @@
     "python": "3.12"
   },
   "steps": {
-    "python-plotly": {
+    "install": {
       "commands": [
+        "npm install",
         "python -m pip install --break-system-packages --no-cache-dir plotly==5.24.1 kaleido==0.2.1"
-      ],
-      "inputs": [
-        { "step": "packages:mise" }
       ]
     }
-  },
-  "deploy": {
-    "inputs": [
-      { "step": "packages:mise" },
-      { "step": "install" },
-      { "step": "python-plotly" }
-    ]
   }
 }
