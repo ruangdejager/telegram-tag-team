@@ -15,7 +15,8 @@
   },
   "deploy": {
     "inputs": [
-      { "step": "build" },
+      { "step": "packages:mise" },
+      { "step": "install" },
       { "step": "python-plotly" }
     ]
   }
