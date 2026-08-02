@@ -8,9 +8,9 @@ import { buildInlineKeyboard } from './keyboard.js';
 // Images supports (hex allowed). Grey = no GPS fix at all (listed off-map in caption).
 const HOUR_MS = 60 * 60 * 1000;
 const AGE_BUCKETS = [
-  { maxAgeMs: 2 * HOUR_MS, colour: '2ecc71', label: '🟢 <2h' },
-  { maxAgeMs: 24 * HOUR_MS, colour: 'f1c40f', label: '🟡 <24h' },
-  { maxAgeMs: 3 * 24 * HOUR_MS, colour: 'e67e22', label: '🟠 <3d' },
+  { maxAgeMs: 2 * HOUR_MS, colour: '2ecc71', label: '🟢 ≤2h' },
+  { maxAgeMs: 24 * HOUR_MS, colour: 'f1c40f', label: '🟡 ≤24h' },
+  { maxAgeMs: 3 * 24 * HOUR_MS, colour: 'e67e22', label: '🟠 ≤3d' },
 ];
 const OLD_COLOUR = 'e74c3c'; // 🔴 3d+
 
@@ -23,7 +23,7 @@ function ageLabel(ageMs) {
   if (ageMs < AGE_BUCKETS[0].maxAgeMs) return AGE_BUCKETS[0].label;
   if (ageMs < AGE_BUCKETS[1].maxAgeMs) return AGE_BUCKETS[1].label;
   if (ageMs < AGE_BUCKETS[2].maxAgeMs) return AGE_BUCKETS[2].label;
-  return '🔴 3d+';
+  return '🔴 >3d';
 }
 
 async function replyNoMapbox(bot, chatId, subscribed, level) {
@@ -65,9 +65,11 @@ export async function sendPositionMap(bot, chatId, subscribed, sessions, level =
     else if (ms < AGE_BUCKETS[2].maxAgeMs) counts.o++;
     else counts.r++;
   }
+  // Telegram parses '<' as an HTML tag opener even inside body text, so use the
+  // Unicode less-than-or-equal glyph instead of a literal '<'.
   const caption =
     `🛰 <b>Last known positions</b> (${withGps.length} tag${withGps.length !== 1 ? 's' : ''})\n` +
-    `🟢 ${counts.g} <2h · 🟡 ${counts.y} <24h · 🟠 ${counts.o} <3d · 🔴 ${counts.r} older` +
+    `🟢 ${counts.g} ≤2h · 🟡 ${counts.y} ≤24h · 🟠 ${counts.o} ≤3d · 🔴 ${counts.r} older` +
     (noGps.length ? `\n<i>No GPS fix ever:</i> ${noGps.join(', ')}` : '');
 
   await sendPhotoOrError(bot, chatId, subscribed, url, caption, { level });
