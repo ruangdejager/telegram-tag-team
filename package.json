@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
+    "postinstall": "node scripts/install-python-deps.mjs",
     "test:parse": "node scripts/testParse.js",
     "test:analytics": "node scripts/testAnalytics.js",
     "test:modes": "node scripts/testModes.js",
