@@ -77,14 +77,21 @@ known column order.
   - 🔍 Missing — same missing-tags list on demand.
   - 📍 GPS — prompts for a tag ID, returns its last known GPS fix as a Google
     Maps link.
+  - 🛰 Map — satellite map with a coloured pin per tag at its last known GPS
+    fix. Pin colour = age of fix: 🟢 <2h, 🟡 <24h, 🟠 <3d, 🔴 older. Tags that
+    have never reported GPS are listed in the caption.
+  - 🔥 Heat — spatial density heatmap of all GPS readings, on satellite. Default
+    is the last 3 days; use `/heatmap 7d` or `/heatmap 2026-07-25 2026-08-01`
+    for a custom window.
   - 🔋 Battery — full-fleet snapshot chart (latest reading per tag).
   - 📉 Trend — prompts for one or more tag IDs, returns a battery-over-time
     line chart for just those tags over the last 7 days (one line per tag).
-    Readings are time-bucketed to stay under QuickChart's data-point limit
-    regardless of how often a tag actually reports.
+    Readings are time-bucketed to keep the render fast regardless of how often
+    a tag actually reports.
   - ✅/❌ Opt in/out of live push updates.
 - **Text commands** (dev): `/battery ID [ID ...]` (7-day trend chart, one or
-  more tags), `/gps ID`, `/missing`. On client bots `/battery` is disabled.
+  more tags), `/gps ID`, `/missing`, `/heatmap [Nd | YYYY-MM-DD YYYY-MM-DD]`,
+  `/map`. On client bots `/battery` is disabled.
 
 ## Bots, levels & the manager bot
 
@@ -98,11 +105,14 @@ independently.
 - `dev` — everything above (full raw tables with RSSI/hops/waves/mov/FW +
   discovery duration + per-device/IMEI breakdown, daily summaries with per-device
   columns and the day's tag-ID list, plus the Trend chart).
-- `client` — raw discovery (Latest/4h/24h) and live push show **only Tag ID,
-  Battery mV, GPS Y/N** plus the combined unique total (no FW, no IMEIs, no
-  duration); summaries show **Time + Combined only** (no per-device column, no
-  tag-ID list); the **Trend** feature is removed. Missing, GPS lookup, Battery
-  chart and Opt in/out are unchanged.
+- `client` — raw discovery (Latest/4h/24h) and live push show **only Tag ID, a
+  battery status dot (🟢/🟡/🔴) and GPS Y/N**, with the combined unique count
+  as the headline (no FW, IMEIs, mV numbers, or duration). Summaries show
+  **Time + Combined only** (no per-device column, no tag-ID list); the **Trend**
+  feature is removed. Missing, GPS lookup, Battery chart, 🛰 Map, 🔥 Heat and
+  Opt in/out are unchanged.
+
+Battery status thresholds (client dots): 🟢 ≥ 3650mV, 🟡 3450–3650mV, 🔴 < 3450mV.
 
 **Manager bot** (owner-only) — set `MANAGER_BOT_TOKEN` and `MANAGER_CHAT_ID`. It
 responds *only* to `MANAGER_CHAT_ID` and drives the registry live (no redeploy):
@@ -125,9 +135,27 @@ responds *only* to `MANAGER_CHAT_ID` and drives the registry live (no redeploy):
 - `DATA_DIR` — base dir for `registry.json` and each bot's `data/<id>/` files
   (use `/data` on Railway).
 - `MANAGER_BOT_TOKEN` / `MANAGER_CHAT_ID` — the manager bot (blank = disabled).
+- `MAPBOX_TOKEN` — public Mapbox token for the 🛰 Map and 🔥 Heat features.
+  Get one at [account.mapbox.com/access-tokens](https://account.mapbox.com/access-tokens);
+  the free tier is 50k static-image loads/month. If blank, those buttons reply
+  with a friendly "not configured" message instead of crashing.
 - Legacy seed (optional): `UNIT_IDS`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
   (+ optional `LEGACY_BOT_ID`/`_NAME`/`_LEVEL`) seed one bot when the registry
   is empty; ignored once `registry.json` exists.
+
+## Rendering stack
+
+Charts (battery snapshot, battery trend) and the density heatmap are rendered
+via **Plotly + Kaleido** (Python) — Node shells out to a small script in
+`scripts/plotly_render.py` that reads a Plotly figure JSON from stdin and writes
+a PNG to stdout. Kaleido bundles a headless Chromium for offline export; the
+container is ~200MB larger than a Node-only one as a result. Setup is declared
+in `nixpacks.toml` (Node + Python + `plotly` + `kaleido`) so Railway builds it
+in one step, no Dockerfile required.
+
+The position map is a **Mapbox Static Images** URL with one coloured pin per
+tag — no Plotly needed for that view. Both position map and heatmap require
+`MAPBOX_TOKEN`.
 
 ## Deploying to Railway
 
@@ -136,9 +164,10 @@ responds *only* to `MANAGER_CHAT_ID` and drives the registry live (no redeploy):
    redeploy/restart; the volume holds `registry.json`, so without it every bot,
    subscriber list and push position is lost): service → **Volumes** →
    **New Volume** → Mount Path `/data`.
-3. Set service variables: the process-global vars above, `DATA_DIR=/data`, and
-   `MANAGER_BOT_TOKEN`/`MANAGER_CHAT_ID`. For the very first bot you can either
-   set the legacy seed vars or just add it via the manager bot after deploy.
+3. Set service variables: the process-global vars above, `DATA_DIR=/data`,
+   `MANAGER_BOT_TOKEN`/`MANAGER_CHAT_ID`, and (for maps/heatmap) `MAPBOX_TOKEN`.
+   For the very first bot you can either set the legacy seed vars or just add
+   it via the manager bot after deploy.
 4. `railway up` (or connect the repo for auto-deploy), then use the manager bot
    to add your bots.
 

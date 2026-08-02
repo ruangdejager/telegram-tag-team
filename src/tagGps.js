@@ -32,6 +32,36 @@ export function findTagLastSeen(sessions, tagId) {
   return best;
 }
 
+// Bulk helper: for every tag id in `sessions`, returns { id, lat, lon, timestampMs,
+// hasGps } where lat/lon/timestampMs describe the tag's most recent GPS-tagged reading
+// (or null lat/lon and the most-recent-seen timestamp if the tag was seen but never
+// reported GPS). Used by the position-map view to paint every known tag on one map.
+export function findAllLatestGps(sessions) {
+  const byId = new Map();
+  for (const session of sessions) {
+    const t = new Date(session.timestamp).getTime();
+    for (const tag of session.tags) {
+      let entry = byId.get(tag.id);
+      if (!entry) {
+        entry = { id: tag.id, lat: null, lon: null, timestampMs: null, hasGps: false, lastSeenMs: 0 };
+        byId.set(tag.id, entry);
+      }
+      if (t > entry.lastSeenMs) entry.lastSeenMs = t;
+      if (tag.hasGps && (!entry.hasGps || t > entry.timestampMs)) {
+        entry.lat = tag.lat;
+        entry.lon = tag.lon;
+        entry.timestampMs = t;
+        entry.hasGps = true;
+      }
+    }
+  }
+  // Fall back to last-seen for tags without GPS so callers still know when we saw them.
+  for (const e of byId.values()) {
+    if (!e.hasGps) e.timestampMs = e.lastSeenMs;
+  }
+  return [...byId.values()];
+}
+
 export function formatTagGps(tagId, gps, seen) {
   const target = tagId.toUpperCase();
   if (!seen) {

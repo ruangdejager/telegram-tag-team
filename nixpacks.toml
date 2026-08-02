@@ -1,0 +1,19 @@
+# Extends the default Node Nixpacks build with Python + Kaleido so the app can
+# shell out to a small Python script for server-side Plotly figure rendering
+# (see scripts/plotly_render.py). Kaleido bundles a Chromium build (~150MB) for
+# offline export, so the final container is ~200MB larger than a Node-only one —
+# acceptable for the map/heatmap quality gain.
+
+[phases.setup]
+nixPkgs = ["nodejs-20_x", "python312", "python312Packages.pip"]
+
+[phases.install]
+# npm install runs automatically for Node projects. Add Python deps here.
+# --break-system-packages is needed on newer nix Python builds that ship as PEP 668-marked.
+cmds = [
+  "npm ci",
+  "python3 -m pip install --break-system-packages --no-cache-dir 'plotly==5.24.1' 'kaleido==0.2.1'",
+]
+
+[start]
+cmd = "node src/index.js"

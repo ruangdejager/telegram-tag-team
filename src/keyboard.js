@@ -16,6 +16,10 @@ export function buildInlineKeyboard(subscribed, level = 'dev') {
       { text: '🔍 Missing', callback_data: 'missing_tags' },
       { text: '📍 GPS', callback_data: 'gps_prompt' },
     ],
+    [
+      { text: '🛰 Map', callback_data: 'position_map' },
+      { text: '🔥 Heat', callback_data: 'heatmap_default' },
+    ],
   ];
 
   if (level === 'client') {

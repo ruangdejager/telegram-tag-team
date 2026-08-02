@@ -6,6 +6,7 @@ import { formatSessionMessage, formatTimeoutAlert } from './formatter.js';
 import { groupSessionsByDate, formatDailySummary } from './dailySummary.js';
 import { buildTagSeries } from './analytics.js';
 import { sendBatteryChart, sendBatteryTrendChart } from './charts.js';
+import { sendPositionMap, sendHeatmap } from './maps.js';
 import { createSubscriberStore } from './subscribers.js';
 import { createStateStore } from './state.js';
 import { findMissingTags, formatMissingTags, formatMissingTagsInline } from './missingTags.js';
@@ -16,6 +17,35 @@ import { parseLogText } from './logParser.js';
 import { mergeSessions } from './sessionMerger.js';
 
 const BATTERY_TREND_DAYS = 7;
+const HEATMAP_DEFAULT_DAYS = 3;
+
+// Parses /heatmap args into a { fromMs, toMs, label } window.
+// Accepts:  ""            -> default 3 days
+//           "5d" / "5"    -> last N days
+//           "YYYY-MM-DD YYYY-MM-DD"  -> explicit inclusive-to-end-of-day range
+// Returns { error: string } on parse failure.
+function parseHeatmapArgs(input) {
+  const parts = String(input || '').trim().split(/\s+/).filter(Boolean);
+  const now = Date.now();
+  if (parts.length === 0) {
+    return { fromMs: now - HEATMAP_DEFAULT_DAYS * 24 * 60 * 60 * 1000, toMs: now, label: `last ${HEATMAP_DEFAULT_DAYS}d` };
+  }
+  if (parts.length === 1) {
+    const m = parts[0].match(/^(\d+)d?$/i);
+    if (!m) return { error: 'Expected <code>Nd</code> (e.g. <code>5d</code>) or <code>YYYY-MM-DD YYYY-MM-DD</code>' };
+    const days = parseInt(m[1], 10);
+    if (days <= 0) return { error: 'Days must be a positive integer.' };
+    return { fromMs: now - days * 24 * 60 * 60 * 1000, toMs: now, label: `last ${days}d` };
+  }
+  if (parts.length === 2) {
+    const from = new Date(parts[0] + 'T00:00:00+02:00');
+    const to = new Date(parts[1] + 'T23:59:59+02:00');
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return { error: 'Invalid date. Use <code>YYYY-MM-DD YYYY-MM-DD</code>.' };
+    if (from > to) return { error: 'From-date must be on or before to-date.' };
+    return { fromMs: from.getTime(), toMs: to.getTime(), label: `${parts[0]} → ${parts[1]}` };
+  }
+  return { error: 'Too many arguments. Use <code>Nd</code> or <code>YYYY-MM-DD YYYY-MM-DD</code>.' };
+}
 const FETCH_BUFFER_MINUTES = 10; // re-fetch a little before lastProcessedTimestamp to catch late cross-device blocks
 
 // One running bot: owns its Telegram connection, per-chat prompt state, per-bot
@@ -42,8 +72,8 @@ export function createBotRuntime(botConfig) {
     `🐄 <b>${name}</b>\n\n` +
     'Use the buttons below to query tag discovery history, or opt in to receive live updates whenever new tags are detected.\n\n' +
     (isClient
-      ? 'Commands: <code>/gps ID</code>, <code>/missing</code>'
-      : `Commands: <code>/battery ID [ID ...]</code> (${BATTERY_TREND_DAYS}d trend), <code>/gps ID</code>, <code>/missing</code>`);
+      ? 'Commands: <code>/gps ID</code>, <code>/missing</code>, <code>/heatmap [Nd | YYYY-MM-DD YYYY-MM-DD]</code>'
+      : `Commands: <code>/battery ID [ID ...]</code> (${BATTERY_TREND_DAYS}d trend), <code>/gps ID</code>, <code>/missing</code>, <code>/heatmap [Nd | YYYY-MM-DD YYYY-MM-DD]</code>`);
 
   async function sendMessage(bot, chatId, text) {
     await bot.sendMessage(chatId, text, { parse_mode: 'HTML', disable_web_page_preview: true });
@@ -83,6 +113,14 @@ export function createBotRuntime(botConfig) {
       await runMissingTags(bot, chatId, subscribed);
       return;
     }
+    if (text.startsWith('/heatmap')) {
+      await runHeatmap(bot, chatId, subscribed, text.replace(/^\/heatmap\s*/i, ''));
+      return;
+    }
+    if (text.startsWith('/map')) {
+      await runPositionMap(bot, chatId, subscribed);
+      return;
+    }
 
     const pending = pendingByChat.get(chatId);
     if (pending) {
@@ -119,6 +157,10 @@ export function createBotRuntime(botConfig) {
     } else if (data === 'gps_prompt') {
       pendingByChat.set(chatId, { action: 'gps' });
       await sendMessage(bot, chatId, '📍 Send the tag ID you want the last GPS location for (e.g. <code>3E1E</code>). Or use <code>/gps 3E1E</code>.');
+    } else if (data === 'position_map') {
+      await runPositionMap(bot, chatId, subscribed);
+    } else if (data === 'heatmap_default') {
+      await runHeatmap(bot, chatId, subscribed, '');
     } else if (data === 'analytics_batt_chart') {
       const sessions = await fetchHistorySessions(unitIds, {});
       await sendBatteryChart(bot, chatId, buildTagSeries(sessions), subscribed, level);
@@ -182,6 +224,27 @@ export function createBotRuntime(botConfig) {
     const sessions = await fetchHistorySessions(unitIds, { hoursBack: appConfig.liveWindowHours });
     const missing = findMissingTags(sessions, new Date());
     await sendWithButtons(bot, chatId, formatMissingTags(missing), subscribed);
+  }
+
+  async function runPositionMap(bot, chatId, subscribed) {
+    // Pull the whole live-tracking window so a tag last seen 2 days ago (orange) still
+    // appears; anything older than that is unlikely to reflect reality anyway.
+    const sessions = await fetchHistorySessions(unitIds, { hoursBack: appConfig.liveWindowHours });
+    await sendPositionMap(bot, chatId, subscribed, sessions, level);
+  }
+
+  async function runHeatmap(bot, chatId, subscribed, rawInput) {
+    const parsed = parseHeatmapArgs(rawInput);
+    if (parsed.error) {
+      await sendWithButtons(bot, chatId, `⚠️ ${parsed.error}`, subscribed);
+      return;
+    }
+    // Fetch the exact window the user asked for; history.js clamps to HISTORY_START.
+    const from = new Date(parsed.fromMs);
+    const sessions = await fetchHistorySessions(unitIds, { fromDate: from });
+    await sendHeatmap(bot, chatId, subscribed, sessions, {
+      fromMs: parsed.fromMs, toMs: parsed.toMs, label: parsed.label, level,
+    });
   }
 
   async function runBatteryTrend(bot, chatId, subscribed, rawInput) {

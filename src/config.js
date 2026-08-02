@@ -30,6 +30,10 @@ export const appConfig = {
   // worker bots at runtime. Optional — if unset, no manager bot is started.
   managerBotToken: process.env.MANAGER_BOT_TOKEN || '',
   managerChatId: process.env.MANAGER_CHAT_ID || '',
+  // Mapbox public token, used for satellite basemaps (position map + density heatmap).
+  // Get one at https://account.mapbox.com/access-tokens. Optional — if unset, the map
+  // features respond with a friendly "not configured" message instead of crashing.
+  mapboxToken: process.env.MAPBOX_TOKEN || '',
 };
 
 export const BOT_LEVELS = ['dev', 'client'];
