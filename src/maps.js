@@ -38,6 +38,22 @@ function ageLabel(ageMs) {
   return '🔴 >3d';
 }
 
+// Mapbox "pin-s" markers anchor at their bottom tip, not their center, and the
+// pin graphic (~30px tall at the logical/pre-@2x size we compute zoom against)
+// extends upward from that tip. A tight cluster of pins therefore reads as
+// visually shifted toward the top of the frame even though their true
+// coordinates are exactly centered — the coordinate is centered, but the ink
+// isn't. Compensate by requesting a viewport centered slightly north of the
+// true coordinate centroid, by half a pin-height's worth of degrees at the
+// computed zoom, so the pin bodies' upward extension lands in that headroom
+// and the visible marker cluster balances out.
+const PIN_HEIGHT_PX = 30;
+function compensateForPinAnchor({ centerLat, zoom }) {
+  const cosPhi = Math.cos((centerLat * Math.PI) / 180) || 1e-6;
+  const degPerPixelLat = (360 * cosPhi) / (256 * 2 ** zoom);
+  return centerLat + (PIN_HEIGHT_PX / 2) * degPerPixelLat;
+}
+
 async function replyNoMapbox(bot, chatId, subscribed, level) {
   await bot.sendMessage(chatId, '⚠️ Map features are not configured. Ask the operator to set <code>MAPBOX_TOKEN</code>.', {
     parse_mode: 'HTML',
@@ -68,7 +84,8 @@ export async function sendPositionMap(bot, chatId, subscribed, sessions, level =
   const overlay = pins.join(','); // Mapbox URL cap is ~8k chars; ~40 chars/pin means we're safe up to ~200 tags.
 
   const fit = fitBoundsToZoom(withGps, { width: MAP_WIDTH, height: MAP_HEIGHT, fill: MAP_FILL });
-  const viewport = `${fit.centerLon.toFixed(6)},${fit.centerLat.toFixed(6)},${fit.zoom.toFixed(2)}`;
+  const viewportCenterLat = compensateForPinAnchor(fit);
+  const viewport = `${fit.centerLon.toFixed(6)},${viewportCenterLat.toFixed(6)},${fit.zoom.toFixed(2)}`;
   const url = `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static/${overlay}/${viewport}/${MAP_WIDTH}x${MAP_HEIGHT}@2x?access_token=${appConfig.mapboxToken}`;
 
   const counts = { g: 0, y: 0, o: 0, r: 0 };

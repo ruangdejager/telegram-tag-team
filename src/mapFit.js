@@ -5,10 +5,16 @@
 // densitymapbox heatmap use this so their scale is a function of the point
 // spread, not the point count.
 //
-// Math background: Mapbox/Web Mercator uses 256-px tiles doubling in count
-// per zoom level, so:
-//   deg-per-pixel of longitude at zoom z, latitude φ ≈ 360 / (256 · 2^z · cos φ)
-//   deg-per-pixel of latitude  at zoom z              ≈ 360 / (256 · 2^z)
+// Math background: Web Mercator's x (longitude) is exactly linear in degrees —
+// pixels-per-degree-longitude = worldSize/360 everywhere, no latitude term. Only
+// y (latitude) picks up a local secant(φ) stretch factor (Mercator is conformal,
+// so the projection's local scale is isotropic at a point, but longitude's global
+// linearity means the cos φ term shows up on the latitude axis, not longitude —
+// this is the reverse of what a first guess suggests, and got these two swapped
+// in an earlier version, which shifted the fit off just enough to look "not quite
+// centered" once padding was added around it):
+//   pixels-per-degree-longitude(z)        = 256·2^z / 360
+//   pixels-per-degree-latitude(z, φ, local) = 256·2^z / 360 · sec(φ)
 // Solving each for z (given target span in degrees ≤ fill · dimension pixels)
 // then taking the smaller z fits both axes with the box at exactly `fill` of
 // the tightest-constrained dimension.
@@ -31,8 +37,8 @@ export function fitBoundsToZoom(points, { width, height, fill = 0.8 } = {}) {
   const lonSpan = Math.max(maxLon - minLon, 1e-6);
   const cosPhi = Math.cos((centerLat * Math.PI) / 180) || 1e-6;
 
-  const zLon = Math.log2((fill * width * 360) / (256 * lonSpan * cosPhi));
-  const zLat = Math.log2((fill * height * 360) / (256 * latSpan));
+  const zLon = Math.log2((fill * width * 360) / (256 * lonSpan));
+  const zLat = Math.log2((fill * height * 360 * cosPhi) / (256 * latSpan));
   const zoom = Math.max(0, Math.min(zLat, zLon, 20));
 
   return { centerLat, centerLon, zoom };
