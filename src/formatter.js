@@ -1,18 +1,5 @@
 import { formatPerDeviceTotals } from './utils.js';
-import { batteryEmoji as devBatteryEmoji } from './batteryStatus.js';
-
-// Client-simplified battery buckets — deliberately fewer/coarser than the dev
-// thresholds so a non-technical reader sees just OK/warning/low, not the finer
-// 4-band grading the operator uses for maintenance decisions.
-const CLIENT_BATT_GREEN_MIN = 3650;
-const CLIENT_BATT_YELLOW_MIN = 3450;
-
-function clientBatteryEmoji(mv) {
-  if (mv === null || mv === undefined || Number.isNaN(mv)) return '⚪';
-  if (mv >= CLIENT_BATT_GREEN_MIN) return '🟢';
-  if (mv >= CLIENT_BATT_YELLOW_MIN) return '🟡';
-  return '🔴';
-}
+import { batteryEmoji } from './batteryStatus.js';
 
 function formatDeviceBreakdown(session) {
   const lines = session.involvedUnitIds.map((unitId) => {
@@ -44,7 +31,7 @@ const DEV_COLUMN_DEFS = [
   { label: 'Hops', width: 4, get: (t) => t.hops },
   { label: 'RSSI', width: 6, always: true, get: (t) => t.rssi },
   { label: 'Batt', width: 6, always: true, get: (t) => t.battery },
-  { label: 'St', width: 3, always: true, get: (t) => devBatteryEmoji(t.battery) },
+  { label: 'St', width: 3, always: true, get: (t) => batteryEmoji(t.battery) },
   { label: 'Waves', width: 5, get: (t) => t.waveCount },
   { label: 'Mov', width: 4, get: (t) => t.movementState },
   { label: 'GPS', width: 4, always: true, get: (t) => (t.hasGps ? 'Y' : 'N') },
@@ -52,9 +39,11 @@ const DEV_COLUMN_DEFS = [
 ];
 
 // Client sees only: Tag ID + a battery-health dot + GPS Y/N. No raw mV, no FW/IMEI/etc.
+// Uses the same 4-colour battery scheme as dev so operator + client agree on which
+// tags are "low" — client just doesn't see the raw mV number or the thresholds.
 const CLIENT_COLUMN_DEFS = [
   { label: 'Tag ID', width: 6, get: (t) => t.id },
-  { label: 'Batt', width: 4, get: (t) => clientBatteryEmoji(t.battery) },
+  { label: 'Batt', width: 4, get: (t) => batteryEmoji(t.battery) },
   { label: 'GPS', width: 3, get: (t) => (t.hasGps ? 'Y' : 'N') },
 ];
 
@@ -63,7 +52,7 @@ function formatClientSession(session) {
   const header =
     `🏷 <b>Tag Discovery — ${session.time} (${session.date})</b>\n` +
     `<b>Unique tags detected: ${session.total}</b>\n` +
-    `<i>🟢 healthy · 🟡 warning · 🔴 low battery</i>\n\n`;
+    `<i>🟢 healthy · 🔵 working · 🟠 watch · 🔴 low battery</i>\n\n`;
 
   const cols = CLIENT_COLUMN_DEFS;
   const div = cols.map((c) => dashes(c.width)).join('-+-');

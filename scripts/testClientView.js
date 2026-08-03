@@ -37,7 +37,7 @@ assert(!/\bFW\b/.test(client), 'client hides FW column');
 assert(!client.includes('Discovery took'), 'client hides discovery duration');
 assert(!client.includes('Combined ->') && !client.includes('866049074634379'), 'client hides per-device / IMEI breakdown');
 assert(client.includes(`Unique tags detected: ${session.total}`), 'client surfaces unique-tag count prominently in header');
-assert(/[🟢🟡🔴]/u.test(client), 'client uses battery status dots (no raw mV shown)');
+assert(/[🟢🔵🟠🔴]/u.test(client), 'client uses battery status dots (no raw mV shown)');
 assert(!/\b3[0-9]{3}\b/.test(client), 'client does NOT show raw millivolt battery numbers');
 // Dev keeps everything it had.
 assert(dev.includes('Discovery took') && dev.includes('Combined ->') && /\bFW\b/.test(dev), 'dev still shows duration + breakdown + FW');

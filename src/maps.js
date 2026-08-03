@@ -17,7 +17,10 @@ const OLD_COLOUR = 'e74c3c'; // 🔴 3d+
 
 // Fit target: bounding box of the plotted points should occupy this fraction of
 // the image surface. Same for map and heatmap so their "spatial feel" agrees.
-const MAP_FILL = 0.8;
+// Lower value → more surrounding context (roads/landmarks) visible around the pins;
+// higher value → tighter crop. 0.55 leaves ~22% padding each side, comfortably more
+// generous than Mapbox's /auto/ default so pins never crowd the frame edges.
+const MAP_FILL = 0.55;
 const MAP_WIDTH = 1000;
 const MAP_HEIGHT = 800;
 const HEATMAP_WIDTH = 900;
