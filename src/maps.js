@@ -3,6 +3,7 @@ import { renderPlotly } from './plotlyRenderer.js';
 import { sendPhotoOrError } from './telegramSend.js';
 import { findAllLatestGps } from './tagGps.js';
 import { buildInlineKeyboard } from './keyboard.js';
+import { fitBoundsToZoom } from './mapFit.js';
 
 // Age-of-last-fix → pin colour. Chosen from the "colored pin" set Mapbox Static
 // Images supports (hex allowed). Grey = no GPS fix at all (listed off-map in caption).
@@ -13,6 +14,14 @@ const AGE_BUCKETS = [
   { maxAgeMs: 3 * 24 * HOUR_MS, colour: 'e67e22', label: '🟠 ≤3d' },
 ];
 const OLD_COLOUR = 'e74c3c'; // 🔴 3d+
+
+// Fit target: bounding box of the plotted points should occupy this fraction of
+// the image surface. Same for map and heatmap so their "spatial feel" agrees.
+const MAP_FILL = 0.8;
+const MAP_WIDTH = 1000;
+const MAP_HEIGHT = 800;
+const HEATMAP_WIDTH = 900;
+const HEATMAP_HEIGHT = 700;
 
 function ageColour(ageMs) {
   for (const b of AGE_BUCKETS) if (ageMs < b.maxAgeMs) return b.colour;
@@ -34,8 +43,9 @@ async function replyNoMapbox(bot, chatId, subscribed, level) {
 }
 
 // Renders a Mapbox Static Images URL with one small coloured pin per GPS-fixed tag.
-// The Static Images API auto-fits the viewport to the pins when we use `auto/` and
-// draws them all in a single GET request — no server-side compositing needed.
+// Uses an explicit center+zoom fitted to the bounding box (not Mapbox's default
+// /auto/), so a wider spread of points zooms out but adding more points inside
+// the same bounding box doesn't — the scale reflects geography, not count.
 export async function sendPositionMap(bot, chatId, subscribed, sessions, level = 'dev') {
   if (!appConfig.mapboxToken) return replyNoMapbox(bot, chatId, subscribed, level);
 
@@ -51,11 +61,12 @@ export async function sendPositionMap(bot, chatId, subscribed, sessions, level =
     return;
   }
 
-  // Colour by fix age. Same tag never appears twice (findAllLatestGps returns one entry per id).
   const pins = withGps.map((e) => `pin-s+${ageColour(now - e.timestampMs)}(${e.lon.toFixed(6)},${e.lat.toFixed(6)})`);
-  // Mapbox URL cap is ~8k chars; ~40 chars/pin means we're safe up to ~200 tags.
-  const overlay = pins.join(',');
-  const url = `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static/${overlay}/auto/1000x800@2x?access_token=${appConfig.mapboxToken}`;
+  const overlay = pins.join(','); // Mapbox URL cap is ~8k chars; ~40 chars/pin means we're safe up to ~200 tags.
+
+  const fit = fitBoundsToZoom(withGps, { width: MAP_WIDTH, height: MAP_HEIGHT, fill: MAP_FILL });
+  const viewport = `${fit.centerLon.toFixed(6)},${fit.centerLat.toFixed(6)},${fit.zoom.toFixed(2)}`;
+  const url = `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static/${overlay}/${viewport}/${MAP_WIDTH}x${MAP_HEIGHT}@2x?access_token=${appConfig.mapboxToken}`;
 
   const counts = { g: 0, y: 0, o: 0, r: 0 };
   for (const e of withGps) {
@@ -79,9 +90,27 @@ export async function sendPositionMap(bot, chatId, subscribed, sessions, level =
 // or per-tag hover can be built if needed.
 export { ageLabel };
 
+// Density colorscale that starts near-transparent so a lone point renders as a
+// faint mark rather than a fully saturated blob. Densely-clustered points sum
+// to higher z within Plotly's kernel and get closer to the dark-red end.
+const HEATMAP_COLORSCALE = [
+  [0.0, 'rgba(255,255,178,0.00)'], // fully transparent — no data
+  [0.05, 'rgba(255,255,178,0.35)'], // very light yellow — single/isolated readings
+  [0.25, 'rgba(254,204,92,0.65)'],  // gold — a few overlapping readings
+  [0.55, 'rgba(253,141,60,0.80)'],  // orange — a real cluster
+  [0.85, 'rgba(240,59,32,0.90)'],   // red — hotspot
+  [1.0, 'rgba(189,0,38,1.00)'],     // dark red — max concentration
+];
+
+// Fixed density scale: 1 = a lone reading, ~8+ = full saturation. Chosen so a
+// single point stays near the light end of the colorscale (see the [0.05] stop
+// above), matching the "single point should be much lighter" spec.
+const HEATMAP_ZMIN = 0;
+const HEATMAP_ZMAX = 8;
+
 // Spatial density heatmap over the given date range, using Plotly's densitymapbox
 // with a Mapbox satellite basemap. Uses every GPS reading in the range (not just
-// per-tag latest), so a tag that stayed on one spot for hours shows up denser
+// per-tag latest) so a tag that stayed on one spot for hours shows up denser
 // there than a tag that only appeared once — which is exactly the point.
 export async function sendHeatmap(bot, chatId, subscribed, sessions, { fromMs, toMs, label, level = 'dev' } = {}) {
   if (!appConfig.mapboxToken) return replyNoMapbox(bot, chatId, subscribed, level);
@@ -103,25 +132,21 @@ export async function sendHeatmap(bot, chatId, subscribed, sessions, { fromMs, t
     return;
   }
 
-  // Auto-center on the mean position; densitymapbox handles zoom via its own layout.
-  const meanLat = lats.reduce((a, b) => a + b, 0) / lats.length;
-  const meanLon = lons.reduce((a, b) => a + b, 0) / lons.length;
-  // Zoom heuristic: tight cluster (typical farm) is ~15, spread out drops to ~13.
-  const latRange = Math.max(...lats) - Math.min(...lats);
-  const lonRange = Math.max(...lons) - Math.min(...lons);
-  const spread = Math.max(latRange, lonRange);
-  const zoom = spread < 0.005 ? 16 : spread < 0.02 ? 15 : spread < 0.05 ? 14 : spread < 0.2 ? 12 : 10;
+  const points = lats.map((lat, i) => ({ lat, lon: lons[i] }));
+  const fit = fitBoundsToZoom(points, { width: HEATMAP_WIDTH, height: HEATMAP_HEIGHT, fill: MAP_FILL });
 
   const figure = {
     data: [{
       type: 'densitymapbox',
       lat: lats,
       lon: lons,
-      z: lats.map(() => 1), // equal-weight — density is measured by point count per cell
-      radius: 25,
-      colorscale: 'YlOrRd',
+      z: lats.map(() => 1), // equal-weight; density comes from summed kernels at each cell
+      radius: 18,           // narrower kernel so isolated points stay visibly isolated
+      zmin: HEATMAP_ZMIN,
+      zmax: HEATMAP_ZMAX,
+      colorscale: HEATMAP_COLORSCALE,
       showscale: true,
-      colorbar: { title: 'density' },
+      colorbar: { title: { text: 'density' } },
       hovertemplate: 'lat %{lat:.5f}, lon %{lon:.5f}<extra></extra>',
     }],
     layout: {
@@ -129,14 +154,14 @@ export async function sendHeatmap(bot, chatId, subscribed, sessions, { fromMs, t
       mapbox: {
         style: 'satellite-streets',
         accesstoken: appConfig.mapboxToken,
-        center: { lat: meanLat, lon: meanLon },
-        zoom,
+        center: { lat: fit.centerLat, lon: fit.centerLon },
+        zoom: fit.zoom,
       },
       margin: { l: 0, r: 0, t: 40, b: 0 },
     },
   };
 
-  const png = await renderPlotly(figure, { width: 900, height: 700 });
+  const png = await renderPlotly(figure, { width: HEATMAP_WIDTH, height: HEATMAP_HEIGHT });
   const caption = `🔥 <b>Tag density heatmap</b> (${label}) — ${lats.length} GPS reading${lats.length !== 1 ? 's' : ''}`;
   await sendPhotoOrError(bot, chatId, subscribed, png, caption, { level, filename: 'heatmap.png' });
 }

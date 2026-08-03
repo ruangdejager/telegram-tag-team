@@ -73,7 +73,7 @@ export function createBotRuntime(botConfig) {
     'Use the buttons below to query tag discovery history, or opt in to receive live updates whenever new tags are detected.\n\n' +
     (isClient
       ? 'Commands: <code>/gps ID</code>, <code>/missing</code>, <code>/heatmap [Nd | YYYY-MM-DD YYYY-MM-DD]</code>'
-      : `Commands: <code>/battery ID [ID ...]</code> (${BATTERY_TREND_DAYS}d trend), <code>/gps ID</code>, <code>/missing</code>, <code>/heatmap [Nd | YYYY-MM-DD YYYY-MM-DD]</code>`);
+      : `Commands: <code>/battery ID [ID ...]</code> or <code>/battery *</code> (${BATTERY_TREND_DAYS}d trend, per tag or all), <code>/gps ID</code>, <code>/missing</code>, <code>/heatmap [Nd | YYYY-MM-DD YYYY-MM-DD]</code>`);
 
   async function sendMessage(bot, chatId, text) {
     await bot.sendMessage(chatId, text, { parse_mode: 'HTML', disable_web_page_preview: true });
@@ -166,7 +166,7 @@ export function createBotRuntime(botConfig) {
       await sendBatteryChart(bot, chatId, buildTagSeries(sessions), subscribed, level);
     } else if (data === 'batt_trend_prompt' && !isClient) {
       pendingByChat.set(chatId, { action: 'batt_trend' });
-      await sendMessage(bot, chatId, `📉 Send one or more tag IDs (space/comma separated) for a ${BATTERY_TREND_DAYS}-day trend. E.g. <code>3E1E 441F</code>. Or use <code>/battery 3E1E 441F</code>.`);
+      await sendMessage(bot, chatId, `📉 Send one or more tag IDs (space/comma separated) for a ${BATTERY_TREND_DAYS}-day trend, or <code>*</code> for all tags. E.g. <code>3E1E 441F</code> or <code>*</code>. You can also use <code>/battery 3E1E 441F</code> / <code>/battery *</code>.`);
     } else if (data === 'optin') {
       subStore.optIn(chatId);
       await sendWithButtons(bot, chatId, '✅ You are now subscribed to live tag discovery updates.', true);
@@ -248,16 +248,31 @@ export function createBotRuntime(botConfig) {
   }
 
   async function runBatteryTrend(bot, chatId, subscribed, rawInput) {
-    const { ids, invalid } = parseTagIdList(rawInput);
-    if (invalid.length > 0) {
-      await sendMessage(bot, chatId, `⚠️ Ignoring invalid tag ID${invalid.length > 1 ? 's' : ''}: <code>${invalid.map((s) => s.replace(/</g, '&lt;')).join(', ')}</code> (must be 1-4 printable-ASCII chars, no spaces).`);
-    }
-    if (ids.length === 0) {
-      await sendWithButtons(bot, chatId, '⚠️ No valid tag IDs given. Send tag IDs, e.g. <code>3E1E 441F</code>.', subscribed);
-      return;
-    }
+    const trimmed = String(rawInput || '').trim();
     const sessions = await fetchHistorySessions(unitIds, { hoursBack: BATTERY_TREND_DAYS * 24 });
     const series = buildTagSeries(sessions);
+
+    let ids;
+    if (trimmed === '*') {
+      // Wildcard: every tag with battery data in the last 7 days. Sorted so the
+      // legend order is stable across renders and matches what /battery reports.
+      ids = Object.keys(series).sort();
+      if (ids.length === 0) {
+        await sendWithButtons(bot, chatId, `⚠️ No battery data for any tag in the last ${BATTERY_TREND_DAYS} days.`, subscribed);
+        return;
+      }
+    } else {
+      const parsed = parseTagIdList(trimmed);
+      if (parsed.invalid.length > 0) {
+        await sendMessage(bot, chatId, `⚠️ Ignoring invalid tag ID${parsed.invalid.length > 1 ? 's' : ''}: <code>${parsed.invalid.map((s) => s.replace(/</g, '&lt;')).join(', ')}</code> (must be 1-4 printable-ASCII chars, no spaces).`);
+      }
+      if (parsed.ids.length === 0) {
+        await sendWithButtons(bot, chatId, '⚠️ No valid tag IDs given. Send tag IDs, e.g. <code>3E1E 441F</code>, or <code>*</code> for all.', subscribed);
+        return;
+      }
+      ids = parsed.ids;
+    }
+
     await sendBatteryTrendChart(bot, chatId, series, subscribed, ids, { windowDays: BATTERY_TREND_DAYS, level });
   }
 

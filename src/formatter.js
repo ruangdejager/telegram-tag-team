@@ -1,14 +1,16 @@
 import { formatPerDeviceTotals } from './utils.js';
+import { batteryEmoji as devBatteryEmoji } from './batteryStatus.js';
 
-// Battery health colour thresholds (mV). Applied to client-level tables where
-// the raw millivolt reading isn't meaningful to the reader; dev keeps the raw mV.
-const BATT_GREEN_MIN = 3650;
-const BATT_YELLOW_MIN = 3450;
+// Client-simplified battery buckets — deliberately fewer/coarser than the dev
+// thresholds so a non-technical reader sees just OK/warning/low, not the finer
+// 4-band grading the operator uses for maintenance decisions.
+const CLIENT_BATT_GREEN_MIN = 3650;
+const CLIENT_BATT_YELLOW_MIN = 3450;
 
-function batteryStatusEmoji(mv) {
+function clientBatteryEmoji(mv) {
   if (mv === null || mv === undefined || Number.isNaN(mv)) return '⚪';
-  if (mv >= BATT_GREEN_MIN) return '🟢';
-  if (mv >= BATT_YELLOW_MIN) return '🟡';
+  if (mv >= CLIENT_BATT_GREEN_MIN) return '🟢';
+  if (mv >= CLIENT_BATT_YELLOW_MIN) return '🟡';
   return '🔴';
 }
 
@@ -35,11 +37,14 @@ function dashes(n) {
 // Dev table columns. Presence varies by discovery mode (advanced has Hops/Waves,
 // basic doesn't; fw version may or may not be reported) — each optional column
 // is only shown if at least one tag in the session actually has a value for it.
+// The "St" (status) column shows a coloured dot per the dev battery-status
+// thresholds (batteryStatus.js), which the Battery chart bars also use.
 const DEV_COLUMN_DEFS = [
   { label: 'Tag ID', width: 6, always: true, get: (t) => t.id },
   { label: 'Hops', width: 4, get: (t) => t.hops },
   { label: 'RSSI', width: 6, always: true, get: (t) => t.rssi },
   { label: 'Batt', width: 6, always: true, get: (t) => t.battery },
+  { label: 'St', width: 3, always: true, get: (t) => devBatteryEmoji(t.battery) },
   { label: 'Waves', width: 5, get: (t) => t.waveCount },
   { label: 'Mov', width: 4, get: (t) => t.movementState },
   { label: 'GPS', width: 4, always: true, get: (t) => (t.hasGps ? 'Y' : 'N') },
@@ -49,7 +54,7 @@ const DEV_COLUMN_DEFS = [
 // Client sees only: Tag ID + a battery-health dot + GPS Y/N. No raw mV, no FW/IMEI/etc.
 const CLIENT_COLUMN_DEFS = [
   { label: 'Tag ID', width: 6, get: (t) => t.id },
-  { label: 'Batt', width: 4, get: (t) => batteryStatusEmoji(t.battery) },
+  { label: 'Batt', width: 4, get: (t) => clientBatteryEmoji(t.battery) },
   { label: 'GPS', width: 3, get: (t) => (t.hasGps ? 'Y' : 'N') },
 ];
 
@@ -82,7 +87,7 @@ function formatClientSession(session) {
 function formatDevSession(session) {
   const header =
     `🏷 <b>Tag Discovery — ${session.time} (${session.date})</b>\n` +
-    `<i>Discovery took ${session.durationSeconds}s</i>\n` +
+    `<i>Discovery took ${session.durationSeconds}s · St: 🟢≥3800 🔵≥3600 🟠≥3500 🔴&lt;3500 mV</i>\n` +
     `<pre>${formatDeviceBreakdown(session)}</pre>\n\n`;
 
   const activeCols = DEV_COLUMN_DEFS.filter(

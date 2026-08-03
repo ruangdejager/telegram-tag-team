@@ -1,17 +1,9 @@
 import { renderPlotly } from './plotlyRenderer.js';
 import { sendPhotoOrError } from './telegramSend.js';
 import { epochToJhb } from './utils.js';
+import { batteryColorHex } from './batteryStatus.js';
 
 const LINE_COLOURS = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#34495e'];
-
-// Battery-status thresholds shared with formatter.js's client view.
-const CRITICAL_MV = 3450;
-const WARNING_MV = 3650;
-function batteryColor(mv) {
-  if (mv < CRITICAL_MV) return '#e74c3c';
-  if (mv < WARNING_MV) return '#f39c12';
-  return '#2ecc71';
-}
 
 // Full-fleet snapshot: one horizontal bar per tag, latest reading, sorted worst
 // to best. Height scales with tag count so every ID gets its own readable row.
@@ -19,7 +11,7 @@ export async function sendBatteryChart(bot, chatId, series, subscribed, level = 
   const tags = Object.keys(series).map((id) => {
     const readings = series[id];
     const latest = readings[readings.length - 1].battery;
-    return { id, latest, colour: batteryColor(latest) };
+    return { id, latest, colour: batteryColorHex(latest) };
   });
   tags.sort((a, b) => a.latest - b.latest);
 
@@ -120,5 +112,7 @@ export async function sendBatteryTrendChart(bot, chatId, series, subscribed, tag
   };
 
   const png = await renderPlotly(figure, { width: 900, height: 500 });
-  await sendPhotoOrError(bot, chatId, subscribed, png, `📉 Battery trend (${windowDays}d) — ${tagIds.join(', ')}`, { level, filename: 'battery-trend.png' });
+  // 40+ tag IDs would blow past Telegram's ~1024-char photo caption limit — abbreviate.
+  const captionIds = tagIds.length > 10 ? `${tagIds.length} tags` : tagIds.join(', ');
+  await sendPhotoOrError(bot, chatId, subscribed, png, `📉 Battery trend (${windowDays}d) — ${captionIds}`, { level, filename: 'battery-trend.png' });
 }
