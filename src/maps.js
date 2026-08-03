@@ -85,8 +85,13 @@ export async function sendPositionMap(bot, chatId, subscribed, sessions, level =
 
   const fit = fitBoundsToZoom(withGps, { width: MAP_WIDTH, height: MAP_HEIGHT, fill: MAP_FILL });
   const viewportCenterLat = compensateForPinAnchor(fit);
-  const viewport = `${fit.centerLon.toFixed(6)},${viewportCenterLat.toFixed(6)},${fit.zoom.toFixed(2)}`;
+  // Explicit bearing=0, pitch=0 — Mapbox's static-image viewport segment accepts
+  // {lon},{lat},{zoom}[,{bearing},{pitch}]; being explicit rules out any parsing
+  // ambiguity from the shorter 3-value form as a possible cause of mis-centering.
+  const viewport = `${fit.centerLon.toFixed(6)},${viewportCenterLat.toFixed(6)},${fit.zoom.toFixed(2)},0,0`;
   const url = `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/static/${overlay}/${viewport}/${MAP_WIDTH}x${MAP_HEIGHT}@2x?access_token=${appConfig.mapboxToken}`;
+  console.log(`[map] fit=${JSON.stringify(fit)} viewport=${viewport} pins=${withGps.length}`);
+  console.log(`[map] url=${url}`);
 
   const counts = { g: 0, y: 0, o: 0, r: 0 };
   for (const e of withGps) {
