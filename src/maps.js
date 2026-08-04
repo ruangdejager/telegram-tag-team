@@ -117,7 +117,7 @@ export async function sendPositionMap(bot, chatId, subscribed, sessions, level =
     .join(', ');
   const caption =
     `🛰 <b>Last known positions</b> (${withGps.length} tag${withGps.length !== 1 ? 's' : ''})\n` +
-    legend + '\n' +
+    legend + '\n\n' +
     tagList +
     (noGps.length ? `\n<i>No GPS fix ever:</i> ${noGps.join(', ')}` : '');
 
