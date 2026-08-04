@@ -2,7 +2,7 @@ import TelegramBot from 'node-telegram-bot-api';
 import { appConfig } from './config.js';
 import { buildInlineKeyboard } from './keyboard.js';
 import { fetchHistorySessions } from './history.js';
-import { formatSessionMessage, formatTimeoutAlert } from './formatter.js';
+import { formatSessionMessage, formatTimeoutAlert, formatLatestCount, formatBatteryStatusList } from './formatter.js';
 import { groupSessionsByDate, formatDailySummary } from './dailySummary.js';
 import { buildTagSeries } from './analytics.js';
 import { sendBatteryChart, sendBatteryTrendChart } from './charts.js';
@@ -11,7 +11,7 @@ import { createSubscriberStore } from './subscribers.js';
 import { createStateStore } from './state.js';
 import { findMissingTags, formatMissingTags, formatMissingTagsInline } from './missingTags.js';
 import { findLatestGpsForTag, findTagLastSeen, formatTagGps } from './tagGps.js';
-import { parseTagIdList } from './utils.js';
+import { parseTagIdList, jhbMidnightMsDaysAgo } from './utils.js';
 import { fetchUnitLogText } from './apiClient.js';
 import { parseLogText } from './logParser.js';
 import { mergeSessions } from './sessionMerger.js';
@@ -140,18 +140,20 @@ export function createBotRuntime(botConfig) {
     await bot.answerCallbackQuery(query.id);
     pendingByChat.delete(chatId);
 
-    if (data === 'hist_latest') {
+    if (data === 'latest_count') {
+      await sendLatestCount(bot, chatId, subscribed);
+    } else if (data === 'hist_latest') {
       await sendLatestRawDiscovery(bot, chatId, subscribed);
     } else if (data === 'hist_4h') {
       await sendRawDiscoveryData(bot, chatId, subscribed, 4, 'last 4 hours');
     } else if (data === 'hist_24h') {
       await sendRawDiscoveryData(bot, chatId, subscribed, 24, 'last 24 hours');
     } else if (data === 'hist_1d') {
-      await sendDailySummaries(bot, chatId, subscribed, { hoursBack: 24 }, 'last day');
+      await sendDailySummaries(bot, chatId, subscribed, { fromDate: new Date(jhbMidnightMsDaysAgo(0)) }, 'last day');
     } else if (data === 'hist_3d') {
-      await sendDailySummaries(bot, chatId, subscribed, { hoursBack: 72 }, 'last 3 days');
+      await sendDailySummaries(bot, chatId, subscribed, { fromDate: new Date(jhbMidnightMsDaysAgo(2)) }, 'last 3 days');
     } else if (data === 'hist_7d') {
-      await sendDailySummaries(bot, chatId, subscribed, { hoursBack: 168 }, 'last 7 days');
+      await sendDailySummaries(bot, chatId, subscribed, { fromDate: new Date(jhbMidnightMsDaysAgo(6)) }, 'last 7 days');
     } else if (data === 'missing_tags') {
       await runMissingTags(bot, chatId, subscribed);
     } else if (data === 'gps_prompt') {
@@ -164,6 +166,9 @@ export function createBotRuntime(botConfig) {
     } else if (data === 'analytics_batt_chart') {
       const sessions = await fetchHistorySessions(unitIds, {});
       await sendBatteryChart(bot, chatId, buildTagSeries(sessions), subscribed, level);
+    } else if (data === 'analytics_batt_list') {
+      const sessions = await fetchHistorySessions(unitIds, {});
+      await sendWithButtons(bot, chatId, formatBatteryStatusList(buildTagSeries(sessions)), subscribed);
     } else if (data === 'batt_trend_prompt' && !isClient) {
       pendingByChat.set(chatId, { action: 'batt_trend' });
       await sendMessage(bot, chatId, `📉 Send one or more tag IDs (space/comma separated) for a ${BATTERY_TREND_DAYS}-day trend, or <code>*</code> for all tags. E.g. <code>3E1E 441F</code> or <code>*</code>. You can also use <code>/battery 3E1E 441F</code> / <code>/battery *</code>.`);
@@ -174,6 +179,16 @@ export function createBotRuntime(botConfig) {
       subStore.optOut(chatId);
       await sendWithButtons(bot, chatId, '❌ You have unsubscribed from live updates.', false);
     }
+  }
+
+  async function sendLatestCount(bot, chatId, subscribed) {
+    const allSessions = await fetchHistorySessions(unitIds, { hoursBack: appConfig.liveWindowHours });
+    const latest = allSessions.at(-1);
+    if (!latest) {
+      await sendWithButtons(bot, chatId, `ℹ️ No tag discoveries in the last ${appConfig.liveWindowHours} hours.`, subscribed);
+      return;
+    }
+    await sendWithButtons(bot, chatId, formatLatestCount(latest), subscribed);
   }
 
   async function sendLatestRawDiscovery(bot, chatId, subscribed) {
@@ -317,7 +332,7 @@ export function createBotRuntime(botConfig) {
           for (const chatId of recipients) await sendMessage(bot, chatId, text);
         } else if (session.total > 0) {
           console.log(`[${id}] Session ${session.timestamp}: ${session.total} unique tag(s) across ${session.involvedUnitIds.join(', ')}.`);
-          const text = formatSessionMessage(session, level);
+          const text = formatLatestCount(session);
           for (const chatId of recipients) await sendWithButtons(bot, chatId, text, subStore.isOptedIn(chatId));
         }
         state.lastProcessedTimestamp = session.timestamp;

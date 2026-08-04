@@ -29,6 +29,11 @@ export const BATT_COLOUR_EMOJI = {
   unknown: '⚪',
 };
 
+// User-facing legend for the 4-colour scheme. "(gps not allowed)" is explanatory
+// text only (low-battery tags typically stop transmitting GPS) — it does not
+// gate or block GPS query behavior anywhere.
+export const BATTERY_LEGEND_TEXT = '🟢 Fully charged · 🔵 Good · 🟠 watch · 🔴 low battery (gps not allowed)';
+
 export function batteryBucket(mv) {
   if (mv === null || mv === undefined || Number.isNaN(mv)) return 'unknown';
   if (mv >= BATT_GREEN_MIN) return 'green';

@@ -25,6 +25,15 @@ export function epochToJhb(epochMs) {
   return { date, time, iso: `${year}-${MONTHS[mon]}-${day}T${time}+02:00` };
 }
 
+// Epoch ms of Johannesburg-local midnight, `daysAgo` calendar days before
+// "today" (JHB-local today, derived from `nowMs`). daysAgo=0 -> today's midnight.
+export function jhbMidnightMsDaysAgo(daysAgo, nowMs = Date.now()) {
+  const { date } = epochToJhb(nowMs);
+  const [day, mon, year] = date.split('-');
+  const todayMidnightUtcMs = Date.UTC(Number(year), Number(MONTHS[mon]) - 1, Number(day)) - JHB_OFFSET_MS;
+  return todayMidnightUtcMs - daysAgo * 24 * 60 * 60 * 1000;
+}
+
 export function lpad(str, width) {
   str = String(str);
   while (str.length < width) str = ' ' + str;

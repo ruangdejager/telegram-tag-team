@@ -1,5 +1,5 @@
 import { formatPerDeviceTotals } from './utils.js';
-import { batteryEmoji } from './batteryStatus.js';
+import { batteryEmoji, BATTERY_LEGEND_TEXT } from './batteryStatus.js';
 
 function formatDeviceBreakdown(session) {
   const lines = session.involvedUnitIds.map((unitId) => {
@@ -52,7 +52,7 @@ function formatClientSession(session) {
   const header =
     `🏷 <b>Tag Discovery — ${session.time} (${session.date})</b>\n` +
     `<b>Unique tags detected: ${session.total}</b>\n` +
-    `<i>🟢 healthy · 🔵 working · 🟠 watch · 🔴 low battery</i>\n\n`;
+    `<i>${BATTERY_LEGEND_TEXT}</i>\n\n`;
 
   const cols = CLIENT_COLUMN_DEFS;
   const div = cols.map((c) => dashes(c.width)).join('-+-');
@@ -76,7 +76,8 @@ function formatClientSession(session) {
 function formatDevSession(session) {
   const header =
     `🏷 <b>Tag Discovery — ${session.time} (${session.date})</b>\n` +
-    `<i>Discovery took ${session.durationSeconds}s · St: 🟢≥3800 🔵≥3600 🟠≥3500 🔴&lt;3500 mV</i>\n` +
+    `<i>Discovery took ${session.durationSeconds}s</i>\n` +
+    `<i>St: 🟢≥3800mV Fully charged · 🔵≥3600mV Good · 🟠≥3500mV watch · 🔴&lt;3500mV low battery (gps not allowed)</i>\n` +
     `<pre>${formatDeviceBreakdown(session)}</pre>\n\n`;
 
   const activeCols = DEV_COLUMN_DEFS.filter(
@@ -111,6 +112,40 @@ function formatDevSession(session) {
 
 export function formatSessionMessage(session, level = 'dev') {
   return level === 'client' ? formatClientSession(session) : formatDevSession(session);
+}
+
+// Minimal headline view: just the discovery time + unique-tag total, no table,
+// no device breakdown. Used by the "Latest Count" button and the opted-in push
+// notification (both levels — there's nothing level-specific to hide here).
+export function formatLatestCount(session) {
+  return (
+    `🏷 <b>Tag Discovery — ${session.time} (${session.date})</b>\n` +
+    `<b>Unique tags detected: ${session.total}</b>`
+  );
+}
+
+// Client-only battery status list: Tag ID + status dot only (no GPS column, no
+// raw mV) — the text analog of dev's Plotly "Battery Level List" chart. `series`
+// is the buildTagSeries(sessions) shape (tag id -> array of readings); uses each
+// tag's latest reading, sorted worst-battery-first to match the chart's ordering.
+export function formatBatteryStatusList(series) {
+  const tags = Object.keys(series)
+    .map((id) => ({ id, latest: series[id][series[id].length - 1].battery }))
+    .sort((a, b) => a.latest - b.latest);
+
+  const header = `🔋 <b>Battery Status</b>\n<i>${BATTERY_LEGEND_TEXT}</i>\n\n`;
+
+  if (tags.length === 0) return header + '<i>No battery data yet.</i>';
+
+  const cols = [{ label: 'Tag ID', width: 6 }, { label: 'St', width: 3 }];
+  const div = cols.map((c) => dashes(c.width)).join('-+-');
+  const rows = [cols.map((c) => lpad(c.label, c.width)).join(' | '), div];
+  tags.forEach((t) => {
+    rows.push(lpad(t.id, 6) + ' | ' + lpad(batteryEmoji(t.latest), 3));
+  });
+  rows.push(div);
+
+  return header + '<pre>' + rows.join('\n') + '</pre>';
 }
 
 export function formatTimeoutAlert(session, level = 'dev') {

@@ -3,9 +3,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseLogText } from '../src/logParser.js';
 import { mergeSessions } from '../src/sessionMerger.js';
-import { formatSessionMessage, formatTimeoutAlert } from '../src/formatter.js';
+import { formatSessionMessage, formatTimeoutAlert, formatLatestCount, formatBatteryStatusList } from '../src/formatter.js';
 import { groupSessionsByDate, formatDailySummary } from '../src/dailySummary.js';
 import { buildInlineKeyboard } from '../src/keyboard.js';
+import { buildTagSeries } from '../src/analytics.js';
+import { ageLabel } from '../src/maps.js';
+import { jhbMidnightMsDaysAgo } from '../src/utils.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const read = (f) => fs.readFileSync(path.join(__dirname, '..', 'test', 'fixtures', f), 'utf8');
@@ -39,9 +42,28 @@ assert(!client.includes('Combined ->') && !client.includes('866049074634379'), '
 assert(client.includes(`Unique tags detected: ${session.total}`), 'client surfaces unique-tag count prominently in header');
 assert(/[🟢🔵🟠🔴]/u.test(client), 'client uses battery status dots (no raw mV shown)');
 assert(!/\b3[0-9]{3}\b/.test(client), 'client does NOT show raw millivolt battery numbers');
+assert(client.includes('🟢 Fully charged · 🔵 Good · 🟠 watch · 🔴 low battery (gps not allowed)'), 'client shows new battery legend wording');
 // Dev keeps everything it had.
 assert(dev.includes('Discovery took') && dev.includes('Combined ->') && /\bFW\b/.test(dev), 'dev still shows duration + breakdown + FW');
 assert(/\b3[0-9]{3}\b/.test(dev), 'dev still shows raw mV battery numbers');
+assert(dev.includes('🟢≥3800mV Fully charged') && dev.includes('low battery (gps not allowed)'), 'dev shows numeric thresholds + new legend wording');
+
+console.log('\n--- formatLatestCount assertions ---');
+const latestCount = formatLatestCount(session);
+console.log(latestCount);
+assert(latestCount.includes(session.time) && latestCount.includes(session.date), 'latest count shows discovery time/date');
+assert(latestCount.includes(`Unique tags detected: ${session.total}`), 'latest count shows unique tag total');
+assert(!latestCount.includes('Discovery took') && !latestCount.includes('Combined ->') && !latestCount.includes('866049074634379'), 'latest count hides duration/breakdown/IMEIs');
+assert(!latestCount.includes('Tag ID'), 'latest count has no per-tag table');
+
+console.log('\n--- formatBatteryStatusList assertions ---');
+const series = buildTagSeries(sessions);
+const battList = formatBatteryStatusList(series);
+console.log(battList);
+assert(battList.includes('Tag ID') && battList.includes('St'), 'battery list shows Tag ID + St columns');
+assert(!/\bGPS\b/.test(battList), 'battery list has no GPS column');
+assert(!/\b3[0-9]{3}\b/.test(battList), 'battery list does NOT show raw mV numbers');
+assert(battList.includes('Fully charged'), 'battery list includes shared legend text');
 
 console.log('\n--- client daily summary assertions ---');
 const { byDate, dateOrder } = groupSessionsByDate(sessions);
@@ -59,7 +81,36 @@ const clientKb = JSON.stringify(buildInlineKeyboard(false, 'client'));
 const devKb = JSON.stringify(buildInlineKeyboard(false, 'dev'));
 assert(!clientKb.includes('batt_trend_prompt'), 'client keyboard omits Trend');
 assert(devKb.includes('batt_trend_prompt'), 'dev keyboard keeps Trend');
-assert(clientKb.includes('analytics_batt_chart') && clientKb.includes('gps_prompt') && clientKb.includes('missing_tags'), 'client keeps Battery/GPS/Missing');
+assert(clientKb.includes('analytics_batt_list') && clientKb.includes('gps_prompt') && clientKb.includes('missing_tags'), 'client keeps Battery List/GPS/Missing');
+assert(!clientKb.includes('analytics_batt_chart'), 'client no longer has the battery chart button');
+assert(devKb.includes('analytics_batt_chart') && !devKb.includes('analytics_batt_list'), 'dev still uses the battery chart, not the list');
+assert(clientKb.includes('latest_count') && devKb.includes('latest_count'), 'both levels have Latest Count');
+assert(!clientKb.includes('hist_latest') && !clientKb.includes('hist_4h') && !clientKb.includes('hist_24h'), 'client drops Latest/4h/24h');
+assert(devKb.includes('hist_latest') && devKb.includes('hist_4h') && devKb.includes('hist_24h'), 'dev keeps Latest/4h/24h');
+assert(clientKb.includes('hist_1d') && clientKb.includes('hist_3d') && !clientKb.includes('hist_7d'), 'client keeps 1d/3d, drops 7d');
+assert(devKb.includes('hist_1d') && devKb.includes('hist_3d') && devKb.includes('hist_7d'), 'dev keeps 1d/3d/7d');
+assert(clientKb.includes('GPS Query') && devKb.includes('GPS Query'), 'both levels rename GPS to GPS Query');
+assert(clientKb.includes('GPS Status Map') && devKb.includes('GPS Status Map'), 'both levels rename Map to GPS Status Map');
+assert(clientKb.includes('Battery Status List') && devKb.includes('Battery Level List'), 'client/dev battery button labels diverge');
+
+console.log('\n--- map age-bucket assertions ---');
+const HOUR = 60 * 60 * 1000;
+assert(ageLabel(1 * HOUR) === '🟢 ≤2h', 'age 1h -> ≤2h green');
+assert(ageLabel(6 * HOUR) === '🟡 ≤12h', 'age 6h -> ≤12h yellow');
+assert(ageLabel(20 * HOUR) === '🟠 ≤24h', 'age 20h -> ≤24h orange');
+assert(ageLabel(30 * HOUR) === '🔴 >24h', 'age 30h -> >24h red');
+
+console.log('\n--- jhbMidnightMsDaysAgo assertions ---');
+// 04-Aug-2026 10:30 UTC = 12:30 JHB (afternoon) -> today's JHB midnight is 03-Aug-2026 22:00 UTC.
+const noonJhbNow = Date.UTC(2026, 7, 4, 10, 30, 0);
+assert(jhbMidnightMsDaysAgo(0, noonJhbNow) === Date.UTC(2026, 7, 3, 22, 0, 0), 'midnight(0) from afternoon JHB is today');
+assert(jhbMidnightMsDaysAgo(2, noonJhbNow) === Date.UTC(2026, 7, 1, 22, 0, 0), 'midnight(2) from afternoon JHB is 2 days back');
+// 00:05 JHB (just after midnight) = 03-Aug-2026 22:05 UTC -> "today" is still 04-Aug JHB.
+const justAfterMidnightJhb = Date.UTC(2026, 7, 3, 22, 5, 0);
+assert(jhbMidnightMsDaysAgo(0, justAfterMidnightJhb) === Date.UTC(2026, 7, 3, 22, 0, 0), 'midnight(0) just after JHB midnight stays on today');
+// 23:55 JHB (just before midnight) = 04-Aug-2026 21:55 UTC -> "today" is still 04-Aug JHB, not tomorrow.
+const justBeforeMidnightJhb = Date.UTC(2026, 7, 4, 21, 55, 0);
+assert(jhbMidnightMsDaysAgo(0, justBeforeMidnightJhb) === Date.UTC(2026, 7, 3, 22, 0, 0), 'midnight(0) just before JHB midnight does not roll to tomorrow');
 
 console.log('\n--- client timeout alert assertions ---');
 const fakeTimeout = { timestamp: session.timestamp, timeoutUnitIds: ['866049074634379'], involvedUnitIds: ['866049074634379', '866049074634403'] };

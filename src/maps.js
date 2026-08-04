@@ -9,11 +9,13 @@ import { fitBoundsToZoom } from './mapFit.js';
 // Images supports (hex allowed). Grey = no GPS fix at all (listed off-map in caption).
 const HOUR_MS = 60 * 60 * 1000;
 const AGE_BUCKETS = [
-  { maxAgeMs: 2 * HOUR_MS, colour: '2ecc71', label: '🟢 ≤2h' },
-  { maxAgeMs: 24 * HOUR_MS, colour: 'f1c40f', label: '🟡 ≤24h' },
-  { maxAgeMs: 3 * 24 * HOUR_MS, colour: 'e67e22', label: '🟠 ≤3d' },
+  { maxAgeMs: 2 * HOUR_MS, colour: '2ecc71', emoji: '🟢', ageText: '≤2h' },
+  { maxAgeMs: 12 * HOUR_MS, colour: 'f1c40f', emoji: '🟡', ageText: '≤12h' },
+  { maxAgeMs: 24 * HOUR_MS, colour: 'e67e22', emoji: '🟠', ageText: '≤24h' },
 ];
-const OLD_COLOUR = 'e74c3c'; // 🔴 3d+
+const OLD_COLOUR = 'e74c3c'; // 🔴 older than 24h
+const OLD_EMOJI = '🔴';
+const OLD_AGE_TEXT = '>24h';
 
 // Fit target: bounding box of the plotted points should occupy this fraction of
 // the image surface. Same for map and heatmap so their "spatial feel" agrees.
@@ -32,10 +34,8 @@ function ageColour(ageMs) {
 }
 
 function ageLabel(ageMs) {
-  if (ageMs < AGE_BUCKETS[0].maxAgeMs) return AGE_BUCKETS[0].label;
-  if (ageMs < AGE_BUCKETS[1].maxAgeMs) return AGE_BUCKETS[1].label;
-  if (ageMs < AGE_BUCKETS[2].maxAgeMs) return AGE_BUCKETS[2].label;
-  return '🔴 >3d';
+  const bucket = AGE_BUCKETS.find((b) => ageMs < b.maxAgeMs);
+  return bucket ? `${bucket.emoji} ${bucket.ageText}` : `${OLD_EMOJI} ${OLD_AGE_TEXT}`;
 }
 
 // Mapbox "pin-s" markers anchor at their bottom tip, not their center, and the
@@ -93,19 +93,21 @@ export async function sendPositionMap(bot, chatId, subscribed, sessions, level =
   console.log(`[map] fit=${JSON.stringify(fit)} viewport=${viewport} pins=${withGps.length}`);
   console.log(`[map] url=${url}`);
 
-  const counts = { g: 0, y: 0, o: 0, r: 0 };
+  const bucketCounts = AGE_BUCKETS.map(() => 0);
+  let oldCount = 0;
   for (const e of withGps) {
     const ms = now - e.timestampMs;
-    if (ms < AGE_BUCKETS[0].maxAgeMs) counts.g++;
-    else if (ms < AGE_BUCKETS[1].maxAgeMs) counts.y++;
-    else if (ms < AGE_BUCKETS[2].maxAgeMs) counts.o++;
-    else counts.r++;
+    const idx = AGE_BUCKETS.findIndex((b) => ms < b.maxAgeMs);
+    if (idx === -1) oldCount++;
+    else bucketCounts[idx]++;
   }
   // Telegram parses '<' as an HTML tag opener even inside body text, so use the
   // Unicode less-than-or-equal glyph instead of a literal '<'.
+  const legend = AGE_BUCKETS.map((b, i) => `${b.emoji} ${bucketCounts[i]} ${b.ageText}`).join(' · ') +
+    ` · ${OLD_EMOJI} ${oldCount} older`;
   const caption =
     `🛰 <b>Last known positions</b> (${withGps.length} tag${withGps.length !== 1 ? 's' : ''})\n` +
-    `🟢 ${counts.g} ≤2h · 🟡 ${counts.y} ≤24h · 🟠 ${counts.o} ≤3d · 🔴 ${counts.r} older` +
+    legend +
     (noGps.length ? `\n<i>No GPS fix ever:</i> ${noGps.join(', ')}` : '');
 
   await sendPhotoOrError(bot, chatId, subscribed, url, caption, { level });
