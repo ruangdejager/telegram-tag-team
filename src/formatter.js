@@ -120,7 +120,8 @@ export function formatSessionMessage(session, level = 'dev') {
 export function formatLatestCount(session) {
   return (
     `🏷 <b>Tag Discovery — ${session.time} (${session.date})</b>\n` +
-    `<b>Unique tags detected: ${session.total}</b>`
+    `<i>Unique tags detected:</i>\n\n` +
+    `<b>${session.total}</b>`
   );
 }
 

@@ -38,6 +38,11 @@ function ageLabel(ageMs) {
   return bucket ? `${bucket.emoji} ${bucket.ageText}` : `${OLD_EMOJI} ${OLD_AGE_TEXT}`;
 }
 
+function ageEmoji(ageMs) {
+  const bucket = AGE_BUCKETS.find((b) => ageMs < b.maxAgeMs);
+  return bucket ? bucket.emoji : OLD_EMOJI;
+}
+
 // Mapbox "pin-s" markers anchor at their bottom tip, not their center, and the
 // pin graphic (~30px tall at the logical/pre-@2x size we compute zoom against)
 // extends upward from that tip. A tight cluster of pins therefore reads as
@@ -105,9 +110,14 @@ export async function sendPositionMap(bot, chatId, subscribed, sessions, level =
   // Unicode less-than-or-equal glyph instead of a literal '<'.
   const legend = AGE_BUCKETS.map((b, i) => `${b.emoji} ${bucketCounts[i]} ${b.ageText}`).join(' · ') +
     ` · ${OLD_EMOJI} ${oldCount} older`;
+  const tagList = [...withGps]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((e) => `${ageEmoji(now - e.timestampMs)} ${e.id}`)
+    .join(', ');
   const caption =
     `🛰 <b>Last known positions</b> (${withGps.length} tag${withGps.length !== 1 ? 's' : ''})\n` +
-    legend +
+    legend + '\n' +
+    tagList +
     (noGps.length ? `\n<i>No GPS fix ever:</i> ${noGps.join(', ')}` : '');
 
   await sendPhotoOrError(bot, chatId, subscribed, url, caption, { level });

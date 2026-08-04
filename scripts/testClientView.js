@@ -52,7 +52,7 @@ console.log('\n--- formatLatestCount assertions ---');
 const latestCount = formatLatestCount(session);
 console.log(latestCount);
 assert(latestCount.includes(session.time) && latestCount.includes(session.date), 'latest count shows discovery time/date');
-assert(latestCount.includes(`Unique tags detected: ${session.total}`), 'latest count shows unique tag total');
+assert(latestCount.includes('<i>Unique tags detected:</i>') && latestCount.includes(`<b>${session.total}</b>`), 'latest count shows italic label + bold count on its own line');
 assert(!latestCount.includes('Discovery took') && !latestCount.includes('Combined ->') && !latestCount.includes('866049074634379'), 'latest count hides duration/breakdown/IMEIs');
 assert(!latestCount.includes('Tag ID'), 'latest count has no per-tag table');
 
