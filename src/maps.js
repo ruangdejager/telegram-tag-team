@@ -15,7 +15,7 @@ const AGE_BUCKETS = [
 ];
 const OLD_COLOUR = 'e74c3c'; // 🔴 older than 24h
 const OLD_EMOJI = '🔴';
-const OLD_AGE_TEXT = '>24h';
+const OLD_AGE_TEXT = '> 1d';
 
 // Fit target: bounding box of the plotted points should occupy this fraction of
 // the image surface. Same for map and heatmap so their "spatial feel" agrees.
@@ -109,9 +109,10 @@ export async function sendPositionMap(bot, chatId, subscribed, sessions, level =
   // Telegram parses '<' as an HTML tag opener even inside body text, so use the
   // Unicode less-than-or-equal glyph instead of a literal '<'.
   const legend = AGE_BUCKETS.map((b, i) => `${b.emoji} ${bucketCounts[i]} ${b.ageText}`).join(' · ') +
-    ` · ${OLD_EMOJI} ${oldCount} older`;
+    ` · ${OLD_EMOJI} ${oldCount} ${OLD_AGE_TEXT}`;
+  // Oldest fix first (smallest timestampMs = largest age).
   const tagList = [...withGps]
-    .sort((a, b) => a.id.localeCompare(b.id))
+    .sort((a, b) => a.timestampMs - b.timestampMs)
     .map((e) => `${ageEmoji(now - e.timestampMs)} ${e.id}`)
     .join(', ');
   const caption =

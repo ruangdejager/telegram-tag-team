@@ -98,7 +98,7 @@ const HOUR = 60 * 60 * 1000;
 assert(ageLabel(1 * HOUR) === '🟢 ≤2h', 'age 1h -> ≤2h green');
 assert(ageLabel(6 * HOUR) === '🟡 ≤12h', 'age 6h -> ≤12h yellow');
 assert(ageLabel(20 * HOUR) === '🟠 ≤24h', 'age 20h -> ≤24h orange');
-assert(ageLabel(30 * HOUR) === '🔴 >24h', 'age 30h -> >24h red');
+assert(ageLabel(30 * HOUR) === '🔴 > 1d', 'age 30h -> > 1d red');
 
 console.log('\n--- jhbMidnightMsDaysAgo assertions ---');
 // 04-Aug-2026 10:30 UTC = 12:30 JHB (afternoon) -> today's JHB midnight is 03-Aug-2026 22:00 UTC.
