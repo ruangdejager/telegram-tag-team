@@ -5,7 +5,7 @@ import { parseLogText } from '../src/logParser.js';
 import { mergeSessions } from '../src/sessionMerger.js';
 import { formatSessionMessage, formatTimeoutAlert, formatLatestCount, formatBatteryStatusList } from '../src/formatter.js';
 import { groupSessionsByDate, formatDailySummary } from '../src/dailySummary.js';
-import { buildInlineKeyboard } from '../src/keyboard.js';
+import { buildFullKeyboard, buildSimpleKeyboard } from '../src/keyboard.js';
 import { buildTagSeries } from '../src/analytics.js';
 import { ageLabel } from '../src/maps.js';
 import { jhbMidnightMsDaysAgo } from '../src/utils.js';
@@ -77,8 +77,8 @@ assert(!clientSummary.includes('Unique tags for the day'), 'client summary hides
 assert(devSummary.includes('Per-Device') && devSummary.includes('Unique tags for the day'), 'dev summary keeps per-device + day list');
 
 console.log('\n--- client keyboard assertions ---');
-const clientKb = JSON.stringify(buildInlineKeyboard(false, 'client'));
-const devKb = JSON.stringify(buildInlineKeyboard(false, 'dev'));
+const clientKb = JSON.stringify(buildFullKeyboard(false, 'client'));
+const devKb = JSON.stringify(buildFullKeyboard(false, 'dev'));
 assert(!clientKb.includes('batt_trend_prompt'), 'client keyboard omits Trend');
 assert(devKb.includes('batt_trend_prompt'), 'dev keyboard keeps Trend');
 assert(clientKb.includes('analytics_batt_list') && clientKb.includes('gps_prompt') && clientKb.includes('missing_tags'), 'client keeps Battery List/GPS/Missing');
@@ -92,6 +92,13 @@ assert(devKb.includes('hist_1d') && devKb.includes('hist_3d') && devKb.includes(
 assert(clientKb.includes('GPS Query') && devKb.includes('GPS Query'), 'both levels rename GPS to GPS Query');
 assert(clientKb.includes('GPS Status Map') && devKb.includes('GPS Status Map'), 'both levels rename Map to GPS Status Map');
 assert(clientKb.includes('Battery Status List') && devKb.includes('Battery Level List'), 'client/dev battery button labels diverge');
+
+console.log('\n--- simple keyboard assertions ---');
+const simpleKb = JSON.stringify(buildSimpleKeyboard());
+assert(simpleKb.includes('latest_count') && simpleKb.includes('"menu"'), 'simple keyboard has Latest Count + Menu');
+assert(!simpleKb.includes('hist_1d') && !simpleKb.includes('missing_tags') && !simpleKb.includes('optin') && !simpleKb.includes('optout'), 'simple keyboard has no other buttons');
+const simpleButtonCount = JSON.parse(simpleKb).inline_keyboard.flat().length;
+assert(simpleButtonCount === 2, 'simple keyboard has exactly 2 buttons');
 
 console.log('\n--- map age-bucket assertions ---');
 const HOUR = 60 * 60 * 1000;

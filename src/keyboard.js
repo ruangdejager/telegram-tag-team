@@ -1,7 +1,19 @@
-// Builds the inline menu. Level defaults to 'dev' so existing callers keep the full menu.
+// Default screen: just "Latest Count" + "Menu" — tapping Menu reveals the full
+// button list below. Kept minimal so most replies aren't cluttered with buttons
+// the user doesn't need for a quick check.
+export function buildSimpleKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: '🏷 Latest Count', callback_data: 'latest_count' }],
+      [{ text: '📋 Menu', callback_data: 'menu' }],
+    ],
+  };
+}
+
+// Full menu. Level defaults to 'dev' so existing callers keep the full menu.
 // Client trims raw-discovery buttons to a single "Latest Count" headline, keeps
 // 1d/3d summaries (drops 7d), and swaps the battery chart for a text status list.
-export function buildInlineKeyboard(subscribed, level = 'dev') {
+export function buildFullKeyboard(subscribed, level = 'dev') {
   const rows = [[{ text: '🏷 Latest Count', callback_data: 'latest_count' }]];
 
   if (level === 'client') {

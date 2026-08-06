@@ -2,7 +2,7 @@ import { appConfig } from './config.js';
 import { renderPlotly } from './plotlyRenderer.js';
 import { sendPhotoOrError } from './telegramSend.js';
 import { findAllLatestGps } from './tagGps.js';
-import { buildInlineKeyboard } from './keyboard.js';
+import { buildSimpleKeyboard } from './keyboard.js';
 import { fitBoundsToZoom } from './mapFit.js';
 
 // Age-of-last-fix → pin colour. Chosen from the "colored pin" set Mapbox Static
@@ -62,7 +62,7 @@ function compensateForPinAnchor({ centerLat, zoom }) {
 async function replyNoMapbox(bot, chatId, subscribed, level) {
   await bot.sendMessage(chatId, '⚠️ Map features are not configured. Ask the operator to set <code>MAPBOX_TOKEN</code>.', {
     parse_mode: 'HTML',
-    reply_markup: buildInlineKeyboard(subscribed, level),
+    reply_markup: buildSimpleKeyboard(),
   });
 }
 

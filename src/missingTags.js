@@ -34,9 +34,15 @@ export function findMissingTags(sessions, now = new Date(), {
   return missing;
 }
 
+// Formats an hour count as "Nd" when it's an exact multiple of a day, else "Nh".
+function formatWindow(hours) {
+  return hours % 24 === 0 ? `${hours / 24}d` : `${hours}h`;
+}
+
 export function formatMissingTags(missing, { thresholdHours = appConfig.missingThresholdHours, windowHours = appConfig.liveWindowHours } = {}) {
+  const windowLabel = formatWindow(windowHours);
   if (missing.length === 0) {
-    return `✅ <b>No missing tags.</b>\nAll tags seen in the last ${windowHours}h have also been seen in the last ${thresholdHours}h.`;
+    return `✅ <b>No missing tags.</b>\nAll tags seen in the last ${windowLabel} have also been seen in the last ${thresholdHours}h.`;
   }
   const rows = missing.map((m) => {
     const h = m.hoursSince;
@@ -44,7 +50,7 @@ export function formatMissingTags(missing, { thresholdHours = appConfig.missingT
     return `${m.id}  —  ${m.lastSeen.date} ${m.lastSeen.time} (${ago})`;
   });
   return `🔍 <b>Missing Tags</b> (${missing.length})\n` +
-    `<i>Seen in last ${windowHours}h, but not in last ${thresholdHours}h</i>\n\n` +
+    `<i>Seen in last ${windowLabel}, but not in last ${thresholdHours}h</i>\n\n` +
     `<pre>${rows.join('\n')}</pre>`;
 }
 

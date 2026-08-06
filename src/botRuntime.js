@@ -1,6 +1,6 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { appConfig } from './config.js';
-import { buildInlineKeyboard } from './keyboard.js';
+import { buildSimpleKeyboard, buildFullKeyboard } from './keyboard.js';
 import { fetchHistorySessions } from './history.js';
 import { formatSessionMessage, formatTimeoutAlert, formatLatestCount, formatBatteryStatusList } from './formatter.js';
 import { groupSessionsByDate, formatDailySummary } from './dailySummary.js';
@@ -18,6 +18,7 @@ import { mergeSessions } from './sessionMerger.js';
 
 const BATTERY_TREND_DAYS = 7;
 const HEATMAP_DEFAULT_DAYS = 3;
+const MISSING_TAGS_WINDOW_HOURS = 7 * 24;
 
 // Parses /heatmap args into a { fromMs, toMs, label } window.
 // Accepts:  ""            -> default 3 days
@@ -79,11 +80,14 @@ export function createBotRuntime(botConfig) {
     await bot.sendMessage(chatId, text, { parse_mode: 'HTML', disable_web_page_preview: true });
   }
 
-  async function sendWithButtons(bot, chatId, text, subscribed) {
+  // Attaches the simple default screen (Latest Count + Menu) unless `full` is set —
+  // the opted-in live push and the "Menu" button itself are the only two places that
+  // ask for the complete button list; everything else falls back to the simple screen.
+  async function sendWithButtons(bot, chatId, text, subscribed, { full = false } = {}) {
     await bot.sendMessage(chatId, text, {
       parse_mode: 'HTML',
       disable_web_page_preview: true,
-      reply_markup: buildInlineKeyboard(subscribed, level),
+      reply_markup: full ? buildFullKeyboard(subscribed, level) : buildSimpleKeyboard(),
     });
   }
 
@@ -142,6 +146,8 @@ export function createBotRuntime(botConfig) {
 
     if (data === 'latest_count') {
       await sendLatestCount(bot, chatId, subscribed);
+    } else if (data === 'menu') {
+      await sendWithButtons(bot, chatId, '📋 <b>Full menu</b>', subscribed, { full: true });
     } else if (data === 'hist_latest') {
       await sendLatestRawDiscovery(bot, chatId, subscribed);
     } else if (data === 'hist_4h') {
@@ -236,9 +242,9 @@ export function createBotRuntime(botConfig) {
   }
 
   async function runMissingTags(bot, chatId, subscribed) {
-    const sessions = await fetchHistorySessions(unitIds, { hoursBack: appConfig.liveWindowHours });
-    const missing = findMissingTags(sessions, new Date());
-    await sendWithButtons(bot, chatId, formatMissingTags(missing), subscribed);
+    const sessions = await fetchHistorySessions(unitIds, { hoursBack: MISSING_TAGS_WINDOW_HOURS });
+    const missing = findMissingTags(sessions, new Date(), { windowHours: MISSING_TAGS_WINDOW_HOURS });
+    await sendWithButtons(bot, chatId, formatMissingTags(missing, { windowHours: MISSING_TAGS_WINDOW_HOURS }), subscribed);
   }
 
   async function runPositionMap(bot, chatId, subscribed) {
@@ -333,7 +339,7 @@ export function createBotRuntime(botConfig) {
         } else if (session.total > 0) {
           console.log(`[${id}] Session ${session.timestamp}: ${session.total} unique tag(s) across ${session.involvedUnitIds.join(', ')}.`);
           const text = formatLatestCount(session);
-          for (const chatId of recipients) await sendWithButtons(bot, chatId, text, subStore.isOptedIn(chatId));
+          for (const chatId of recipients) await sendWithButtons(bot, chatId, text, subStore.isOptedIn(chatId), { full: true });
         }
         state.lastProcessedTimestamp = session.timestamp;
         stateStore.save(state);
