@@ -9,7 +9,7 @@ import { sendBatteryChart, sendBatteryTrendChart } from './charts.js';
 import { sendPositionMap, sendHeatmap } from './maps.js';
 import { createSubscriberStore } from './subscribers.js';
 import { createStateStore } from './state.js';
-import { findMissingTags, formatMissingTags, formatMissingTagsInline } from './missingTags.js';
+import { findMissingTags, findTagsMissingFromLatest, formatMissingTags, formatMissingTagsInline } from './missingTags.js';
 import { findLatestGpsForTag, findTagLastSeen, formatTagGps } from './tagGps.js';
 import { parseTagIdList, jhbMidnightMsDaysAgo } from './utils.js';
 import { fetchUnitLogText } from './apiClient.js';
@@ -243,7 +243,7 @@ export function createBotRuntime(botConfig) {
 
   async function runMissingTags(bot, chatId, subscribed) {
     const sessions = await fetchHistorySessions(unitIds, { hoursBack: MISSING_TAGS_WINDOW_HOURS });
-    const missing = findMissingTags(sessions, new Date(), { windowHours: MISSING_TAGS_WINDOW_HOURS });
+    const missing = findTagsMissingFromLatest(sessions, new Date(), { windowHours: MISSING_TAGS_WINDOW_HOURS });
     await sendWithButtons(bot, chatId, formatMissingTags(missing, { windowHours: MISSING_TAGS_WINDOW_HOURS }), subscribed);
   }
 

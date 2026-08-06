@@ -9,6 +9,7 @@ import { buildFullKeyboard, buildSimpleKeyboard } from '../src/keyboard.js';
 import { buildTagSeries } from '../src/analytics.js';
 import { ageLabel } from '../src/maps.js';
 import { jhbMidnightMsDaysAgo } from '../src/utils.js';
+import { findTagsMissingFromLatest, formatMissingTags } from '../src/missingTags.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const read = (f) => fs.readFileSync(path.join(__dirname, '..', 'test', 'fixtures', f), 'utf8');
@@ -118,6 +119,37 @@ assert(jhbMidnightMsDaysAgo(0, justAfterMidnightJhb) === Date.UTC(2026, 7, 3, 22
 // 23:55 JHB (just before midnight) = 04-Aug-2026 21:55 UTC -> "today" is still 04-Aug JHB, not tomorrow.
 const justBeforeMidnightJhb = Date.UTC(2026, 7, 4, 21, 55, 0);
 assert(jhbMidnightMsDaysAgo(0, justBeforeMidnightJhb) === Date.UTC(2026, 7, 3, 22, 0, 0), 'midnight(0) just before JHB midnight does not roll to tomorrow');
+
+console.log('\n--- findTagsMissingFromLatest assertions ---');
+// Synthetic sessions (ascending): round 1 has A, B, C; round 2 (latest) only has A.
+// B was last seen 3h ago (within threshold, unflagged). C was last seen 10h ago
+// (past the 8h threshold, flagged). A is in the latest round, so not "missing" at all.
+const missingNow = new Date('2026-08-06T12:00:00+02:00');
+const syntheticSessions = [
+  {
+    timestamp: '2026-08-06T02:00:00+02:00', date: '06-Aug-2026', time: '02:00:00',
+    tags: [{ id: 'A' }, { id: 'B' }, { id: 'C' }],
+  },
+  {
+    timestamp: '2026-08-06T09:00:00+02:00', date: '06-Aug-2026', time: '09:00:00',
+    tags: [{ id: 'A' }, { id: 'B' }],
+  },
+  {
+    timestamp: '2026-08-06T11:00:00+02:00', date: '06-Aug-2026', time: '11:00:00',
+    tags: [{ id: 'A' }],
+  },
+];
+const missingFromLatest = findTagsMissingFromLatest(syntheticSessions, missingNow, { windowHours: 7 * 24, thresholdHours: 8 });
+assert(missingFromLatest.length === 2, 'A (in latest round) is excluded; B and C are missing');
+assert(!missingFromLatest.some((m) => m.id === 'A'), 'A is not on the missing list');
+const bEntry = missingFromLatest.find((m) => m.id === 'B');
+const cEntry = missingFromLatest.find((m) => m.id === 'C');
+assert(bEntry && bEntry.flagged === false, 'B (3h since last seen) is not flagged');
+assert(cEntry && cEntry.flagged === true, 'C (10h since last seen) is flagged');
+const missingText = formatMissingTags(missingFromLatest, { windowHours: 7 * 24, thresholdHours: 8 });
+console.log(missingText);
+assert(missingText.includes('🔴') && missingText.includes(' C  —'), 'formatted list shows 🔴 flag next to C');
+assert(!/🔴\s+B\s+—/.test(missingText), 'B is listed without the 🔴 flag');
 
 console.log('\n--- client timeout alert assertions ---');
 const fakeTimeout = { timestamp: session.timestamp, timeoutUnitIds: ['866049074634379'], involvedUnitIds: ['866049074634379', '866049074634403'] };
