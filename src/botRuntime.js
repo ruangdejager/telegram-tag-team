@@ -47,7 +47,15 @@ function parseHeatmapArgs(input) {
   }
   return { error: 'Too many arguments. Use <code>Nd</code> or <code>YYYY-MM-DD YYYY-MM-DD</code>.' };
 }
-const FETCH_BUFFER_MINUTES = 10; // re-fetch a little before lastProcessedTimestamp to catch late cross-device blocks
+// Devices don't always finish uploading a bracket's log by the time a given poll runs
+// (e.g. one device is a few polls late). A single "greater than lastProcessedTimestamp"
+// watermark is fragile against that: once a *later* bracket gets sent, the watermark
+// moves past it, and an earlier bracket that only shows up afterwards is silently
+// skipped forever. Re-scanning a wide trailing window every poll and de-duping against
+// a set of already-sent bracket timestamps (instead of a single watermark) means a
+// late-arriving bracket still gets caught on a later poll as long as it's within this
+// window when it finally appears.
+const POLL_LOOKBACK_HOURS = 4;
 
 // One running bot: owns its Telegram connection, per-chat prompt state, per-bot
 // state + subscriber stores, and level-aware handlers. `botConfig` = { id, name,
@@ -67,7 +75,7 @@ export function createBotRuntime(botConfig) {
   const pendingByChat = new Map(); // chatId -> { action: 'batt_trend' | 'gps' }
 
   let activeBot = null; // only used by start()/stop()/pollOnce(), never by event handlers
-  let state = { lastProcessedTimestamp: null };
+  let state = { lastProcessedTimestamp: null, sentTimestamps: [] };
 
   const welcome =
     `🐄 <b>${name}</b>\n\n` +
@@ -321,12 +329,17 @@ export function createBotRuntime(botConfig) {
     if (!bot) return;
 
     const now = new Date();
-    const fromOverride = state.lastProcessedTimestamp
-      ? new Date(new Date(state.lastProcessedTimestamp).getTime() - FETCH_BUFFER_MINUTES * 60 * 1000)
-      : undefined;
+    const fromOverride = new Date(now.getTime() - POLL_LOOKBACK_HOURS * 60 * 60 * 1000);
+    const sentTimestamps = new Set(state.sentTimestamps || []);
+    // Migration guard: a bot upgraded from the old single-watermark scheme has a
+    // lastProcessedTimestamp but an empty sentTimestamps set. Without this, the first
+    // poll after the upgrade would treat everything already sent in the lookback window
+    // as unsent and re-push it. Once at least one session has been recorded in the new
+    // set, this no longer applies and late arrivals are caught purely by set membership.
+    const legacyWatermark = sentTimestamps.size === 0 ? state.lastProcessedTimestamp : null;
 
     const sessions = (await fetchAllSessions(now, fromOverride))
-      .filter((s) => !state.lastProcessedTimestamp || s.timestamp > state.lastProcessedTimestamp)
+      .filter((s) => !sentTimestamps.has(s.timestamp) && (!legacyWatermark || s.timestamp > legacyWatermark))
       .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 
     for (const session of sessions) {
@@ -341,6 +354,11 @@ export function createBotRuntime(botConfig) {
           const text = formatLatestCount(session);
           for (const chatId of recipients) await sendWithButtons(bot, chatId, text, subStore.isOptedIn(chatId), { full: true });
         }
+        sentTimestamps.add(session.timestamp);
+        // Prune anything the lookback window can no longer re-fetch anyway, so the
+        // set doesn't grow unbounded — it only needs to cover POLL_LOOKBACK_HOURS.
+        const cutoffMs = now.getTime() - POLL_LOOKBACK_HOURS * 60 * 60 * 1000;
+        state.sentTimestamps = [...sentTimestamps].filter((ts) => new Date(ts).getTime() >= cutoffMs);
         state.lastProcessedTimestamp = session.timestamp;
         stateStore.save(state);
       } catch (err) {

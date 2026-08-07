@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { appConfig } from './config.js';
 
-const DEFAULT_STATE = { lastProcessedTimestamp: null };
+const DEFAULT_STATE = { lastProcessedTimestamp: null, sentTimestamps: [] };
 
 // Per-bot state store. Each bot tracks its own lastProcessedTimestamp so two bots
 // pointing at the same IMEIs still push independently.
