@@ -352,7 +352,7 @@ export function createBotRuntime(botConfig) {
         } else if (session.total > 0) {
           console.log(`[${id}] Session ${session.timestamp}: ${session.total} unique tag(s) across ${session.involvedUnitIds.join(', ')}.`);
           const text = formatLatestCount(session);
-          for (const chatId of recipients) await sendWithButtons(bot, chatId, text, subStore.isOptedIn(chatId), { full: true });
+          for (const chatId of recipients) await sendWithButtons(bot, chatId, text, subStore.isOptedIn(chatId));
         }
         sentTimestamps.add(session.timestamp);
         // Prune anything the lookback window can no longer re-fetch anyway, so the
