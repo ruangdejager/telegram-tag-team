@@ -63,7 +63,7 @@ export function findTagsMissingFromLatest(sessions, now = new Date(), {
     for (const tag of session.tags) {
       const prev = lastSeenById.get(tag.id);
       if (!prev || t > prev.timestampMs) {
-        lastSeenById.set(tag.id, { timestampMs: t, date: session.date, time: session.time });
+        lastSeenById.set(tag.id, { timestampMs: t, date: session.date, time: session.time, battery: tag.battery });
       }
     }
   }
@@ -82,7 +82,9 @@ export function findTagsMissingFromLatest(sessions, now = new Date(), {
   return missing;
 }
 
-export function formatMissingTags(missing, { thresholdHours = appConfig.missingThresholdHours, windowHours = appConfig.liveWindowHours } = {}) {
+// `level` gates the last-known battery mV — dev only, matching the raw-discovery
+// table's technical detail; client sees the same list without it.
+export function formatMissingTags(missing, { thresholdHours = appConfig.missingThresholdHours, windowHours = appConfig.liveWindowHours, level = 'dev' } = {}) {
   const windowLabel = formatWindow(windowHours);
   if (missing.length === 0) {
     return `✅ <b>No missing tags.</b>\nEvery tag seen in the last ${windowLabel} was part of the latest discovery.`;
@@ -90,7 +92,8 @@ export function formatMissingTags(missing, { thresholdHours = appConfig.missingT
   const rows = missing.map((m) => {
     const h = m.hoursSince;
     const ago = h < 24 ? `${h.toFixed(1)}h ago` : `${(h / 24).toFixed(1)}d ago`;
-    return `${m.flagged ? '🔴' : '  '} ${m.id}  —  ${m.lastSeen.date} ${m.lastSeen.time} (${ago})`;
+    const battSuffix = level !== 'client' && m.lastSeen.battery != null ? `, ${m.lastSeen.battery}mV` : '';
+    return `${m.flagged ? '🔴' : '  '} ${m.id}  —  ${m.lastSeen.date} ${m.lastSeen.time} (${ago}${battSuffix})`;
   });
   return `🔍 <b>Missing Tags</b> (${missing.length})\n` +
     `<i>Not in the latest discovery, over last ${windowLabel} · 🔴 = not seen in last ${thresholdHours}h</i>\n\n` +

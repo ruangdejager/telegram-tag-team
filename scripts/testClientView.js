@@ -128,15 +128,15 @@ const missingNow = new Date('2026-08-06T12:00:00+02:00');
 const syntheticSessions = [
   {
     timestamp: '2026-08-06T02:00:00+02:00', date: '06-Aug-2026', time: '02:00:00',
-    tags: [{ id: 'A' }, { id: 'B' }, { id: 'C' }],
+    tags: [{ id: 'A', battery: 4000 }, { id: 'B', battery: 3700 }, { id: 'C', battery: 3400 }],
   },
   {
     timestamp: '2026-08-06T09:00:00+02:00', date: '06-Aug-2026', time: '09:00:00',
-    tags: [{ id: 'A' }, { id: 'B' }],
+    tags: [{ id: 'A', battery: 3990 }, { id: 'B', battery: 3690 }],
   },
   {
     timestamp: '2026-08-06T11:00:00+02:00', date: '06-Aug-2026', time: '11:00:00',
-    tags: [{ id: 'A' }],
+    tags: [{ id: 'A', battery: 3980 }],
   },
 ];
 const missingFromLatest = findTagsMissingFromLatest(syntheticSessions, missingNow, { windowHours: 7 * 24, thresholdHours: 8 });
@@ -146,10 +146,14 @@ const bEntry = missingFromLatest.find((m) => m.id === 'B');
 const cEntry = missingFromLatest.find((m) => m.id === 'C');
 assert(bEntry && bEntry.flagged === false, 'B (3h since last seen) is not flagged');
 assert(cEntry && cEntry.flagged === true, 'C (10h since last seen) is flagged');
-const missingText = formatMissingTags(missingFromLatest, { windowHours: 7 * 24, thresholdHours: 8 });
-console.log(missingText);
-assert(missingText.includes('🔴') && missingText.includes(' C  —'), 'formatted list shows 🔴 flag next to C');
-assert(!/🔴\s+B\s+—/.test(missingText), 'B is listed without the 🔴 flag');
+assert(bEntry.lastSeen.battery === 3690 && cEntry.lastSeen.battery === 3400, 'each entry carries its last-known battery mV');
+const missingTextDev = formatMissingTags(missingFromLatest, { windowHours: 7 * 24, thresholdHours: 8, level: 'dev' });
+console.log(missingTextDev);
+assert(missingTextDev.includes('🔴') && missingTextDev.includes(' C  —'), 'formatted list shows 🔴 flag next to C');
+assert(!/🔴\s+B\s+—/.test(missingTextDev), 'B is listed without the 🔴 flag');
+assert(missingTextDev.includes('3690mV') && missingTextDev.includes('3400mV'), 'dev missing list shows last-known battery mV');
+const missingTextClient = formatMissingTags(missingFromLatest, { windowHours: 7 * 24, thresholdHours: 8, level: 'client' });
+assert(!missingTextClient.includes('mV'), 'client missing list hides battery mV');
 
 console.log('\n--- client timeout alert assertions ---');
 const fakeTimeout = { timestamp: session.timestamp, timeoutUnitIds: ['866049074634379'], involvedUnitIds: ['866049074634379', '866049074634403'] };

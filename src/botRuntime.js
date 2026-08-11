@@ -18,7 +18,7 @@ import { mergeSessions } from './sessionMerger.js';
 
 const BATTERY_TREND_DAYS = 7;
 const HEATMAP_DEFAULT_DAYS = 3;
-const MISSING_TAGS_WINDOW_HOURS = 7 * 24;
+const RECENT_TAGS_WINDOW_HOURS = 7 * 24; // shared "recently active" window: Missing List + both battery lists
 
 // Parses /heatmap args into a { fromMs, toMs, label } window.
 // Accepts:  ""            -> default 3 days
@@ -178,10 +178,10 @@ export function createBotRuntime(botConfig) {
     } else if (data === 'heatmap_default') {
       await runHeatmap(bot, chatId, subscribed, '');
     } else if (data === 'analytics_batt_chart') {
-      const sessions = await fetchHistorySessions(unitIds, {});
+      const sessions = await fetchHistorySessions(unitIds, { hoursBack: RECENT_TAGS_WINDOW_HOURS });
       await sendBatteryChart(bot, chatId, buildTagSeries(sessions), subscribed, level);
     } else if (data === 'analytics_batt_list') {
-      const sessions = await fetchHistorySessions(unitIds, {});
+      const sessions = await fetchHistorySessions(unitIds, { hoursBack: RECENT_TAGS_WINDOW_HOURS });
       await sendWithButtons(bot, chatId, formatBatteryStatusList(buildTagSeries(sessions)), subscribed);
     } else if (data === 'batt_trend_prompt' && !isClient) {
       pendingByChat.set(chatId, { action: 'batt_trend' });
@@ -250,9 +250,9 @@ export function createBotRuntime(botConfig) {
   }
 
   async function runMissingTags(bot, chatId, subscribed) {
-    const sessions = await fetchHistorySessions(unitIds, { hoursBack: MISSING_TAGS_WINDOW_HOURS });
-    const missing = findTagsMissingFromLatest(sessions, new Date(), { windowHours: MISSING_TAGS_WINDOW_HOURS });
-    await sendWithButtons(bot, chatId, formatMissingTags(missing, { windowHours: MISSING_TAGS_WINDOW_HOURS }), subscribed);
+    const sessions = await fetchHistorySessions(unitIds, { hoursBack: RECENT_TAGS_WINDOW_HOURS });
+    const missing = findTagsMissingFromLatest(sessions, new Date(), { windowHours: RECENT_TAGS_WINDOW_HOURS });
+    await sendWithButtons(bot, chatId, formatMissingTags(missing, { windowHours: RECENT_TAGS_WINDOW_HOURS, level }), subscribed);
   }
 
   async function runPositionMap(bot, chatId, subscribed) {
