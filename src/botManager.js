@@ -51,19 +51,26 @@ export function createBotManager() {
     return removed;
   }
 
-  // Applies a registry change that affects how the bot runs (IMEIs or level), then
-  // restarts that bot's runtime so it picks the change up cleanly.
-  async function applyAndRestart(id, mutate) {
+  // Applies a registry change that affects how the bot runs (IMEIs or level) by
+  // hot-swapping the config inside the existing runtime. We deliberately DO NOT
+  // stop and restart the runtime here: creating a new TelegramBot on the same token
+  // while the previous poller is still in-flight causes Telegram to return 409s on
+  // the reserved long-poll slot for up to ~50s, and node-telegram-bot-api keeps
+  // retrying on failure, accumulating a ghost poller with every restart (duplicated
+  // replies, missed updates, log spam). The Telegram connection is independent of
+  // the mutable config, so an in-place update is both correct and safe.
+  function applyLiveUpdate(id, mutate) {
     const updated = mutate();
     persist();
-    await stopRuntime(id);
-    startRuntime(getBot(registry, id));
+    const runtime = runningBots.get(id);
+    if (runtime) runtime.applyConfig(getBot(registry, id));
+    else startRuntime(getBot(registry, id));
     return updated;
   }
 
-  const addImei = (id, imei) => applyAndRestart(id, () => registryAddImei(registry, id, imei));
-  const removeImei = (id, imei) => applyAndRestart(id, () => registryRemoveImei(registry, id, imei));
-  const setLevel = (id, level) => applyAndRestart(id, () => registryUpdateBot(registry, id, { level }));
+  const addImei = (id, imei) => applyLiveUpdate(id, () => registryAddImei(registry, id, imei));
+  const removeImei = (id, imei) => applyLiveUpdate(id, () => registryRemoveImei(registry, id, imei));
+  const setLevel = (id, level) => applyLiveUpdate(id, () => registryUpdateBot(registry, id, { level }));
 
   function list() {
     return registry.bots.map((b) => ({ ...b, running: runningBots.has(b.id) }));

@@ -68,8 +68,19 @@ const POLL_LOOKBACK_HOURS = 4;
 // handled, that in-flight call keeps using the real (still-usable-for-API-calls)
 // instance instead of crashing on a null reference.
 export function createBotRuntime(botConfig) {
-  const { id, name, token, level, unitIds, adminChatId } = botConfig;
-  const isClient = level === 'client';
+  // token / id / adminChatId are immutable for the lifetime of the runtime — a token
+  // change or id change would require tearing everything down anyway. name / level /
+  // unitIds are hot-swappable via applyConfig(): we never restart the Telegram polling
+  // for a config edit, since a fresh new TelegramBot() on the same token would race
+  // with the old poller — Telegram's server keeps the long-poll slot reserved for up
+  // to 50s after the client aborts, so a quick restart 409s. The polling loop and
+  // handler wiring don't depend on the mutable fields; only the data-fetch + render
+  // paths do, and those read from `let` bindings updated below.
+  const { id, token, adminChatId } = botConfig;
+  let name = botConfig.name;
+  let level = botConfig.level;
+  let isClient = level === 'client';
+  let unitIds = botConfig.unitIds;
   const stateStore = createStateStore(id);
   const subStore = createSubscriberStore(id, adminChatId);
   const pendingByChat = new Map(); // chatId -> { action: 'batt_trend' | 'gps' }
@@ -77,12 +88,31 @@ export function createBotRuntime(botConfig) {
   let activeBot = null; // only used by start()/stop()/pollOnce(), never by event handlers
   let state = { lastProcessedTimestamp: null, sentTimestamps: [] };
 
-  const welcome =
-    `🐄 <b>${name}</b>\n\n` +
-    'Use the buttons below to query tag discovery history, or opt in to receive live updates whenever new tags are detected.\n\n' +
-    (isClient
-      ? 'Commands: <code>/gps ID</code>, <code>/missing</code>, <code>/heatmap [Nd | YYYY-MM-DD YYYY-MM-DD]</code>'
-      : `Commands: <code>/battery ID [ID ...]</code> or <code>/battery *</code> (${BATTERY_TREND_DAYS}d trend, per tag or all), <code>/gps ID</code>, <code>/missing</code>, <code>/heatmap [Nd | YYYY-MM-DD YYYY-MM-DD]</code>`);
+  let welcome = buildWelcome();
+  function buildWelcome() {
+    return `🐄 <b>${name}</b>\n\n` +
+      'Use the buttons below to query tag discovery history, or opt in to receive live updates whenever new tags are detected.\n\n' +
+      (isClient
+        ? 'Commands: <code>/gps ID</code>, <code>/missing</code>, <code>/heatmap [Nd | YYYY-MM-DD YYYY-MM-DD]</code>'
+        : `Commands: <code>/battery ID [ID ...]</code> or <code>/battery *</code> (${BATTERY_TREND_DAYS}d trend, per tag or all), <code>/gps ID</code>, <code>/missing</code>, <code>/heatmap [Nd | YYYY-MM-DD YYYY-MM-DD]</code>`);
+  }
+
+  // Applies a live config change (IMEIs / level / display name) without touching the
+  // TelegramBot polling connection — the only fields any handler actually reads via
+  // closure are the mutable bindings above, so updating them in place is enough.
+  // Refuses to run if id/token/adminChatId are being changed, since those really would
+  // require a fresh runtime.
+  function applyConfig(newBotConfig) {
+    if (newBotConfig.id !== id) throw new Error(`applyConfig: id mismatch (${id} vs ${newBotConfig.id})`);
+    if (newBotConfig.token !== token) throw new Error(`applyConfig: token change requires restart`);
+    if ((newBotConfig.adminChatId || '') !== (adminChatId || '')) throw new Error('applyConfig: adminChatId change requires restart');
+    name = newBotConfig.name;
+    level = newBotConfig.level;
+    isClient = level === 'client';
+    unitIds = newBotConfig.unitIds;
+    welcome = buildWelcome();
+    console.log(`[${id}] Config updated in place (${level}). Units: ${unitIds.join(', ')}.`);
+  }
 
   async function sendMessage(bot, chatId, text) {
     await bot.sendMessage(chatId, text, { parse_mode: 'HTML', disable_web_page_preview: true });
@@ -410,5 +440,5 @@ export function createBotRuntime(botConfig) {
     console.log(`[${id}] Stopped.`);
   }
 
-  return { id, botConfig, start, stop, pollOnce };
+  return { id, botConfig, start, stop, pollOnce, applyConfig };
 }
