@@ -2,7 +2,7 @@ import TelegramBot from 'node-telegram-bot-api';
 import { appConfig } from './config.js';
 import { buildSimpleKeyboard, buildFullKeyboard } from './keyboard.js';
 import { fetchHistorySessions } from './history.js';
-import { formatSessionMessage, formatTimeoutAlert, formatLatestCount, formatBatteryStatusList } from './formatter.js';
+import { formatSessionMessage, formatTimeoutAlert, formatLatestCount, formatBatteryStatusList, formatCountWindow } from './formatter.js';
 import { groupSessionsByDate, formatDailySummary } from './dailySummary.js';
 import { buildTagSeries } from './analytics.js';
 import { sendBatteryChart, sendBatteryTrendChart } from './charts.js';
@@ -81,6 +81,7 @@ export function createBotRuntime(botConfig) {
   let level = botConfig.level;
   let isClient = level === 'client';
   let unitIds = botConfig.unitIds;
+  let allowedTagIds = botConfig.allowedTagIds || [];
   const stateStore = createStateStore(id);
   const subStore = createSubscriberStore(id, adminChatId);
   const pendingByChat = new Map(); // chatId -> { action: 'batt_trend' | 'gps' }
@@ -93,8 +94,8 @@ export function createBotRuntime(botConfig) {
     return `🐄 <b>${name}</b>\n\n` +
       'Use the buttons below to query tag discovery history, or opt in to receive live updates whenever new tags are detected.\n\n' +
       (isClient
-        ? 'Commands: <code>/gps ID</code>, <code>/missing</code>, <code>/heatmap [Nd | YYYY-MM-DD YYYY-MM-DD]</code>'
-        : `Commands: <code>/battery ID [ID ...]</code> or <code>/battery *</code> (${BATTERY_TREND_DAYS}d trend, per tag or all), <code>/gps ID</code>, <code>/missing</code>, <code>/heatmap [Nd | YYYY-MM-DD YYYY-MM-DD]</code>`);
+        ? 'Commands: <code>/gps ID</code>, <code>/missing</code>, <code>/count Nh</code>, <code>/heatmap [Nd | YYYY-MM-DD YYYY-MM-DD]</code>'
+        : `Commands: <code>/battery ID [ID ...]</code> or <code>/battery *</code> (${BATTERY_TREND_DAYS}d trend, per tag or all), <code>/gps ID</code>, <code>/missing</code>, <code>/count Nh</code>, <code>/heatmap [Nd | YYYY-MM-DD YYYY-MM-DD]</code>`);
   }
 
   // Applies a live config change (IMEIs / level / display name) without touching the
@@ -110,8 +111,24 @@ export function createBotRuntime(botConfig) {
     level = newBotConfig.level;
     isClient = level === 'client';
     unitIds = newBotConfig.unitIds;
+    allowedTagIds = newBotConfig.allowedTagIds || [];
     welcome = buildWelcome();
-    console.log(`[${id}] Config updated in place (${level}). Units: ${unitIds.join(', ')}.`);
+    console.log(`[${id}] Config updated in place (${level}). Units: ${unitIds.join(', ')}. Tag whitelist: ${allowedTagIds.length || 'none'}.`);
+  }
+
+  // Applies the tag-ID whitelist to a session list: any tag not on the whitelist is
+  // stripped, and each session's `total` is recomputed from the remaining tag count.
+  // No-op when the whitelist is empty, so bots without one behave exactly as before.
+  // Used everywhere EXCEPT the dev-side raw discovery buttons (Latest / Last 4h /
+  // Last 24h), which must always surface the true unfiltered reading.
+  function applyTagFilter(sessions) {
+    if (allowedTagIds.length === 0) return sessions;
+    const allow = new Set(allowedTagIds);
+    return sessions.map((s) => {
+      const filteredTags = s.tags.filter((t) => allow.has(t.id));
+      if (filteredTags.length === s.tags.length) return s;
+      return { ...s, tags: filteredTags, total: filteredTags.length };
+    });
   }
 
   async function sendMessage(bot, chatId, text) {
@@ -163,12 +180,17 @@ export function createBotRuntime(botConfig) {
       await runPositionMap(bot, chatId, subscribed);
       return;
     }
+    if (text.startsWith('/count')) {
+      await runCountWindow(bot, chatId, subscribed, text.replace(/^\/count\s*/i, ''));
+      return;
+    }
 
     const pending = pendingByChat.get(chatId);
     if (pending) {
       pendingByChat.delete(chatId);
       if (pending.action === 'batt_trend' && !isClient) return runBatteryTrend(bot, chatId, subscribed, text);
       if (pending.action === 'gps') return runGpsLookup(bot, chatId, subscribed, text);
+      if (pending.action === 'count_window') return runCountWindow(bot, chatId, subscribed, text);
     }
 
     await sendWithButtons(bot, chatId, welcome, subscribed);
@@ -184,6 +206,9 @@ export function createBotRuntime(botConfig) {
 
     if (data === 'latest_count') {
       await sendLatestCount(bot, chatId, subscribed);
+    } else if (data === 'count_window_prompt') {
+      pendingByChat.set(chatId, { action: 'count_window' });
+      await sendMessage(bot, chatId, '🕒 How many hours back should I count? Send a number (e.g. <code>4</code>). Or use <code>/count 4</code>.');
     } else if (data === 'menu') {
       await sendWithButtons(bot, chatId, '📋 <b>Full menu</b>', subscribed, { full: true });
     } else if (data === 'hist_latest') {
@@ -208,10 +233,10 @@ export function createBotRuntime(botConfig) {
     } else if (data === 'heatmap_default') {
       await runHeatmap(bot, chatId, subscribed, '');
     } else if (data === 'analytics_batt_chart') {
-      const sessions = await fetchHistorySessions(unitIds, { hoursBack: RECENT_TAGS_WINDOW_HOURS });
+      const sessions = applyTagFilter(await fetchHistorySessions(unitIds, { hoursBack: RECENT_TAGS_WINDOW_HOURS }));
       await sendBatteryChart(bot, chatId, buildTagSeries(sessions), subscribed, level);
     } else if (data === 'analytics_batt_list') {
-      const sessions = await fetchHistorySessions(unitIds, { hoursBack: RECENT_TAGS_WINDOW_HOURS });
+      const sessions = applyTagFilter(await fetchHistorySessions(unitIds, { hoursBack: RECENT_TAGS_WINDOW_HOURS }));
       await sendWithButtons(bot, chatId, formatBatteryStatusList(buildTagSeries(sessions)), subscribed);
     } else if (data === 'batt_trend_prompt' && !isClient) {
       pendingByChat.set(chatId, { action: 'batt_trend' });
@@ -225,8 +250,50 @@ export function createBotRuntime(botConfig) {
     }
   }
 
+  // Rolling-window count: unique tag IDs across every discovery in the last N hours,
+  // plus the discovery-session count. Whitelist-aware (via applyTagFilter) so the count
+  // reflects only tracked tags. Accepts either just a number of hours (`4`, `4h`) or a
+  // number of days (`3d`). Rejects zero/negative or unparseable input with a friendly
+  // hint so the user can retry without re-prompting.
+  const COUNT_WINDOW_MAX_HOURS = 30 * 24; // cap the window at the historyStart's ballpark
+  async function runCountWindow(bot, chatId, subscribed, rawInput) {
+    const trimmed = String(rawInput || '').trim();
+    const match = trimmed.match(/^(\d+)\s*([hd])?$/i);
+    if (!match) {
+      await sendWithButtons(bot, chatId, '⚠️ Send a positive number of hours (e.g. <code>4</code> or <code>4h</code>), or use days like <code>2d</code>.', subscribed);
+      return;
+    }
+    const n = parseInt(match[1], 10);
+    const unit = (match[2] || 'h').toLowerCase();
+    const hours = unit === 'd' ? n * 24 : n;
+    if (hours <= 0) {
+      await sendWithButtons(bot, chatId, '⚠️ Window must be at least 1 hour.', subscribed);
+      return;
+    }
+    if (hours > COUNT_WINDOW_MAX_HOURS) {
+      await sendWithButtons(bot, chatId, `⚠️ Window too long (max ${COUNT_WINDOW_MAX_HOURS / 24}d).`, subscribed);
+      return;
+    }
+    const sessions = applyTagFilter(await fetchHistorySessions(unitIds, { hoursBack: hours }));
+    // fetchHistorySessions already trims to the requested boundary, so every returned
+    // session is inside the window. A whitelist may have zeroed out some sessions'
+    // totals — those still count as "a discovery happened" but contribute no tag IDs.
+    const uniqueIds = new Set();
+    let sessionCount = 0;
+    for (const s of sessions) {
+      sessionCount++;
+      for (const t of s.tags) uniqueIds.add(t.id);
+    }
+    await sendWithButtons(
+      bot,
+      chatId,
+      formatCountWindow({ hours, uniqueTagCount: uniqueIds.size, sessionCount }),
+      subscribed,
+    );
+  }
+
   async function sendLatestCount(bot, chatId, subscribed) {
-    const allSessions = await fetchHistorySessions(unitIds, { hoursBack: appConfig.liveWindowHours });
+    const allSessions = applyTagFilter(await fetchHistorySessions(unitIds, { hoursBack: appConfig.liveWindowHours }));
     const latest = allSessions.at(-1);
     if (!latest) {
       await sendWithButtons(bot, chatId, `ℹ️ No tag discoveries in the last ${appConfig.liveWindowHours} hours.`, subscribed);
@@ -266,7 +333,7 @@ export function createBotRuntime(botConfig) {
   }
 
   async function sendDailySummaries(bot, chatId, subscribed, range, label) {
-    const sessions = await fetchHistorySessions(unitIds, range);
+    const sessions = applyTagFilter(await fetchHistorySessions(unitIds, range));
     if (sessions.length === 0) {
       await sendWithButtons(bot, chatId, `ℹ️ No tag discoveries in the ${label}.`, subscribed);
       return;
@@ -280,7 +347,7 @@ export function createBotRuntime(botConfig) {
   }
 
   async function runMissingTags(bot, chatId, subscribed) {
-    const sessions = await fetchHistorySessions(unitIds, { hoursBack: RECENT_TAGS_WINDOW_HOURS });
+    const sessions = applyTagFilter(await fetchHistorySessions(unitIds, { hoursBack: RECENT_TAGS_WINDOW_HOURS }));
     const missing = findTagsMissingFromLatest(sessions, new Date(), { windowHours: RECENT_TAGS_WINDOW_HOURS });
     await sendWithButtons(bot, chatId, formatMissingTags(missing, { windowHours: RECENT_TAGS_WINDOW_HOURS, level }), subscribed);
   }
@@ -288,7 +355,7 @@ export function createBotRuntime(botConfig) {
   async function runPositionMap(bot, chatId, subscribed) {
     // Pull the whole live-tracking window so a tag last seen 2 days ago (orange) still
     // appears; anything older than that is unlikely to reflect reality anyway.
-    const sessions = await fetchHistorySessions(unitIds, { hoursBack: appConfig.liveWindowHours });
+    const sessions = applyTagFilter(await fetchHistorySessions(unitIds, { hoursBack: appConfig.liveWindowHours }));
     await sendPositionMap(bot, chatId, subscribed, sessions, level);
   }
 
@@ -300,7 +367,7 @@ export function createBotRuntime(botConfig) {
     }
     // Fetch the exact window the user asked for; history.js clamps to HISTORY_START.
     const from = new Date(parsed.fromMs);
-    const sessions = await fetchHistorySessions(unitIds, { fromDate: from });
+    const sessions = applyTagFilter(await fetchHistorySessions(unitIds, { fromDate: from }));
     await sendHeatmap(bot, chatId, subscribed, sessions, {
       fromMs: parsed.fromMs, toMs: parsed.toMs, label: parsed.label, level,
     });
@@ -308,6 +375,9 @@ export function createBotRuntime(botConfig) {
 
   async function runBatteryTrend(bot, chatId, subscribed, rawInput) {
     const trimmed = String(rawInput || '').trim();
+    // Fetch unfiltered so an explicit /battery ID still works for a tag that isn't on
+    // the whitelist (explicit lookups are intentional — the user knows what they want).
+    // The `*` wildcard applies the whitelist below so "all" means "all tracked."
     const sessions = await fetchHistorySessions(unitIds, { hoursBack: BATTERY_TREND_DAYS * 24 });
     const series = buildTagSeries(sessions);
 
@@ -315,7 +385,9 @@ export function createBotRuntime(botConfig) {
     if (trimmed === '*') {
       // Wildcard: every tag with battery data in the last 7 days. Sorted so the
       // legend order is stable across renders and matches what /battery reports.
-      ids = Object.keys(series).sort();
+      // Whitelist-aware: `*` means "all tracked" when a whitelist is configured.
+      const allow = allowedTagIds.length ? new Set(allowedTagIds) : null;
+      ids = Object.keys(series).filter((id) => !allow || allow.has(id)).sort();
       if (ids.length === 0) {
         await sendWithButtons(bot, chatId, `⚠️ No battery data for any tag in the last ${BATTERY_TREND_DAYS} days.`, subscribed);
         return;
@@ -380,9 +452,17 @@ export function createBotRuntime(botConfig) {
           const text = formatTimeoutAlert(session, level);
           for (const chatId of recipients) await sendMessage(bot, chatId, text);
         } else if (session.total > 0) {
-          console.log(`[${id}] Session ${session.timestamp}: ${session.total} unique tag(s) across ${session.involvedUnitIds.join(', ')}.`);
-          const text = formatLatestCount(session);
-          for (const chatId of recipients) await sendWithButtons(bot, chatId, text, subStore.isOptedIn(chatId));
+          const [filtered] = applyTagFilter([session]);
+          if (filtered.total === 0) {
+            // The round happened but no whitelisted tag was in it — mark sent so we
+            // don't reconsider it, but push nothing (subscribers only care about
+            // discoveries involving their tracked fleet).
+            console.log(`[${id}] Session ${session.timestamp}: ${session.total} raw tag(s), 0 after whitelist — skipping push.`);
+          } else {
+            console.log(`[${id}] Session ${session.timestamp}: ${filtered.total} tracked tag(s) across ${session.involvedUnitIds.join(', ')}.`);
+            const text = formatLatestCount(filtered);
+            for (const chatId of recipients) await sendWithButtons(bot, chatId, text, subStore.isOptedIn(chatId));
+          }
         }
         sentTimestamps.add(session.timestamp);
         // Prune anything the lookback window can no longer re-fetch anyway, so the

@@ -1,7 +1,8 @@
 import { createBotRuntime } from './botRuntime.js';
 import {
   loadRegistry, saveRegistry, addBot as registryAddBot, removeBot as registryRemoveBot,
-  updateBot as registryUpdateBot, addImei as registryAddImei, removeImei as registryRemoveImei, getBot,
+  updateBot as registryUpdateBot, addImei as registryAddImei, removeImei as registryRemoveImei,
+  setAllowedTags as registrySetAllowedTags, getBot,
 } from './registry.js';
 
 // Owns the registry (source of truth on disk) and the map of live bot runtimes.
@@ -71,6 +72,7 @@ export function createBotManager() {
   const addImei = (id, imei) => applyLiveUpdate(id, () => registryAddImei(registry, id, imei));
   const removeImei = (id, imei) => applyLiveUpdate(id, () => registryRemoveImei(registry, id, imei));
   const setLevel = (id, level) => applyLiveUpdate(id, () => registryUpdateBot(registry, id, { level }));
+  const setAllowedTags = (id, tagIds) => applyLiveUpdate(id, () => registrySetAllowedTags(registry, id, tagIds));
 
   function list() {
     return registry.bots.map((b) => ({ ...b, running: runningBots.has(b.id) }));
@@ -95,5 +97,5 @@ export function createBotManager() {
     runningBots.clear();
   }
 
-  return { startAll, addBot, removeBot, addImei, removeImei, setLevel, list, pollAll, stopAll, hasBot: (id) => runningBots.has(id) };
+  return { startAll, addBot, removeBot, addImei, removeImei, setLevel, setAllowedTags, list, pollAll, stopAll, hasBot: (id) => runningBots.has(id) };
 }

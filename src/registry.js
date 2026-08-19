@@ -69,6 +69,14 @@ export function addImei(registry, id, imei) {
   return updateBot(registry, id, { unitIds: [...bot.unitIds, imei] });
 }
 
+export function setAllowedTags(registry, id, tagIds) {
+  getBot(registry, id); // validate existence
+  const normalized = (Array.isArray(tagIds) ? tagIds : String(tagIds || '').split(/[\s,]+/))
+    .map((s) => String(s).trim().toUpperCase())
+    .filter(Boolean);
+  return updateBot(registry, id, { allowedTagIds: normalized });
+}
+
 export function removeImei(registry, id, imei) {
   const bot = getBot(registry, id);
   imei = String(imei).trim();

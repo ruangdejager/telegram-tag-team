@@ -14,7 +14,10 @@ export function buildSimpleKeyboard() {
 // Client trims raw-discovery buttons to a single "Latest Count" headline, keeps
 // 1d/3d summaries (drops 7d), and swaps the battery chart for a text status list.
 export function buildFullKeyboard(subscribed, level = 'dev') {
-  const rows = [[{ text: '🏷 Latest Count', callback_data: 'latest_count' }]];
+  const rows = [
+    [{ text: '🏷 Latest Count', callback_data: 'latest_count' }],
+    [{ text: '🕒 Count Window', callback_data: 'count_window_prompt' }],
+  ];
 
   if (level === 'client') {
     rows.push([

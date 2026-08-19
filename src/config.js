@@ -49,13 +49,20 @@ export function normalizeBotConfig(raw) {
   const unitIds = (Array.isArray(raw.unitIds) ? raw.unitIds : String(raw.unitIds || '').split(','))
     .map((s) => String(s).trim())
     .filter(Boolean);
+  // Optional whitelist of tag IDs the bot should surface everywhere EXCEPT the dev
+  // raw-discovery buttons (Latest / Last 4h / Last 24h, which always show truth).
+  // Empty = no filter, show all tags the readers report — this matches the
+  // pre-whitelist behavior so existing bots keep working unchanged.
+  const allowedTagIds = (Array.isArray(raw.allowedTagIds) ? raw.allowedTagIds : String(raw.allowedTagIds || '').split(/[\s,]+/))
+    .map((s) => String(s).trim().toUpperCase())
+    .filter(Boolean);
 
   if (!id) throw new Error('Bot config missing id');
   if (!token) throw new Error(`Bot "${id}" missing token`);
   if (!BOT_LEVELS.includes(level)) throw new Error(`Bot "${id}" has invalid level "${level}" (expected dev|client)`);
   if (unitIds.length === 0) throw new Error(`Bot "${id}" has no unitIds`);
 
-  return { id, name, token, level, adminChatId, unitIds };
+  return { id, name, token, level, adminChatId, unitIds, allowedTagIds };
 }
 
 // Builds a one-bot registry seed from the legacy single-tenant env vars, so an

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseLogText } from '../src/logParser.js';
 import { mergeSessions } from '../src/sessionMerger.js';
-import { formatSessionMessage, formatTimeoutAlert, formatLatestCount, formatBatteryStatusList } from '../src/formatter.js';
+import { formatSessionMessage, formatTimeoutAlert, formatLatestCount, formatBatteryStatusList, formatCountWindow } from '../src/formatter.js';
 import { groupSessionsByDate, formatDailySummary } from '../src/dailySummary.js';
 import { buildFullKeyboard, buildSimpleKeyboard } from '../src/keyboard.js';
 import { buildTagSeries } from '../src/analytics.js';
@@ -154,6 +154,17 @@ assert(!/🔴\s+B\s+—/.test(missingTextDev), 'B is listed without the 🔴 fla
 assert(missingTextDev.includes('3690mV') && missingTextDev.includes('3400mV'), 'dev missing list shows last-known battery mV');
 const missingTextClient = formatMissingTags(missingFromLatest, { windowHours: 7 * 24, thresholdHours: 8, level: 'client' });
 assert(!missingTextClient.includes('mV'), 'client missing list hides battery mV');
+
+console.log('\n--- formatCountWindow assertions ---');
+const countText4h = formatCountWindow({ hours: 4, uniqueTagCount: 12, sessionCount: 8 });
+console.log(countText4h);
+assert(countText4h.includes('last 4h'), 'count-window header renders hour window');
+assert(countText4h.includes('<b>12</b>'), 'count-window shows unique tag count as bold headline');
+assert(countText4h.includes('across 8 discoveries'), 'count-window shows discovery session count (plural)');
+const countText1 = formatCountWindow({ hours: 1, uniqueTagCount: 3, sessionCount: 1 });
+assert(countText1.includes('across 1 discovery'), 'count-window uses singular when only 1 discovery');
+const countText3d = formatCountWindow({ hours: 72, uniqueTagCount: 25, sessionCount: 40 });
+assert(countText3d.includes('last 3d'), 'count-window renders day window when hours is a day multiple');
 
 console.log('\n--- v2.1.x bare-anchor parser assertions ---');
 const bareAnchorText = read('bareAnchorV21.txt');

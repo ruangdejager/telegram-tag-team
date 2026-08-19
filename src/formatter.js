@@ -125,6 +125,20 @@ export function formatLatestCount(session) {
   );
 }
 
+// Rolling-window count: unique tag IDs across every discovery in the last `hours`
+// hours, plus how many discoveries fell in that window. The user picks `hours`
+// (via the Count Window button or /count command); the whitelist, if any, has
+// already been applied upstream so this only counts what the bot is tracking.
+export function formatCountWindow({ hours, uniqueTagCount, sessionCount }) {
+  const windowLabel = hours % 24 === 0 ? `${hours / 24}d` : `${hours}h`;
+  return (
+    `🏷 <b>Tag Count — last ${windowLabel}</b>\n` +
+    `<i>Unique tags detected:</i>\n\n` +
+    `<b>${uniqueTagCount}</b>\n\n` +
+    `<i>across ${sessionCount} discover${sessionCount === 1 ? 'y' : 'ies'}</i>`
+  );
+}
+
 // Client-only battery status list: Tag ID + status dot only (no GPS column, no
 // raw mV) — the text analog of dev's Plotly "Battery Level List" chart. `series`
 // is the buildTagSeries(sessions) shape (tag id -> array of readings); uses each

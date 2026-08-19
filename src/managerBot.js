@@ -26,6 +26,7 @@ export function startManagerBot(botManager) {
     '<b>/addimei &lt;id&gt; &lt;imei&gt;</b>\n' +
     '<b>/removeimei &lt;id&gt; &lt;imei&gt;</b>\n' +
     '<b>/setlevel &lt;id&gt; dev|client</b>\n' +
+    '<b>/settags &lt;id&gt; &lt;tag ...&gt;</b> — restrict the bot to these tag IDs (blank = show all)\n' +
     '<b>/cancel</b> — abort the current /addbot flow';
 
   async function handle(message) {
@@ -71,6 +72,10 @@ export function startManagerBot(botManager) {
     }
     if (text.startsWith('/setlevel')) {
       await cmdSetLevel(text.replace(/^\/setlevel\s*/i, '').trim());
+      return;
+    }
+    if (text.startsWith('/settags')) {
+      await cmdSetTags(text.replace(/^\/settags\s*/i, '').trim());
       return;
     }
     await send(HELP);
@@ -124,7 +129,8 @@ export function startManagerBot(botManager) {
     const lines = bots.map((b) =>
       `${b.running ? '🟢' : '🔴'} <b>${b.name}</b> (<code>${b.id}</code>) — ${b.level}\n` +
       (b.adminChatId ? `   admin: <code>${b.adminChatId}</code>\n` : '') +
-      `   IMEIs: ${b.unitIds.join(', ')}`);
+      `   IMEIs: ${b.unitIds.join(', ')}\n` +
+      `   Tags: ${b.allowedTagIds && b.allowedTagIds.length ? `${b.allowedTagIds.length} whitelisted` : 'all (no whitelist)'}`);
     await send('📋 <b>Bots</b>\n\n' + lines.join('\n\n'));
   }
 
@@ -144,6 +150,18 @@ export function startManagerBot(botManager) {
     try {
       const updated = adding ? await botManager.addImei(id, imei) : await botManager.removeImei(id, imei);
       await send(`✅ <b>${updated.id}</b> now has IMEIs: ${updated.unitIds.join(', ')} (restarted).`);
+    } catch (err) {
+      await send(`⚠️ ${err.message}`);
+    }
+  }
+
+  async function cmdSetTags(args) {
+    const [id, ...rest] = args.split(/\s+/);
+    if (!id) return send('Usage: /settags &lt;id&gt; &lt;tag ...&gt;   (send just the id to clear the whitelist)');
+    try {
+      const updated = await botManager.setAllowedTags(id, rest.join(' '));
+      const list = updated.allowedTagIds.length ? updated.allowedTagIds.join(', ') : '(none — showing all tags)';
+      await send(`✅ <b>${updated.id}</b> tag whitelist (${updated.allowedTagIds.length}): ${list}`);
     } catch (err) {
       await send(`⚠️ ${err.message}`);
     }
