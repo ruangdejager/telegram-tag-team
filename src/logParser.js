@@ -28,7 +28,15 @@
 
 import { MONTHS } from './utils.js';
 
-const HEADER_RE = /\*(\d{2}:\d{2}:\d{2})\(([+-]\d{2}:\d{2})\)\s+\w+\s+(\d{2})-(\w{3})-(\d{4})\s+(\d+)mV/g;
+// Discovery-block anchor. Two formats coexist depending on firmware:
+//   old (≤ v2.0.x): *09:00:12(+02:00) Wed 19-Aug-2026 4010mV\n
+//   new (v2.1.x+):  *09:01:58(+02:00)\n
+// The trailing lookahead `[ \t]*(?=\r?\n)` is what tells an anchor apart from an
+// info line like `*09:02:07(+02:00) tag_fota: check requested` — anchors have
+// nothing but whitespace after the offset (or after mV, in the old format), and
+// info lines carry human-readable text there. For new-style bare anchors we carry
+// the day/month/year forward from the previous full-format anchor in the same log.
+const HEADER_RE = /\*(\d{2}:\d{2}:\d{2})\(([+-]\d{2}:\d{2})\)(?:\s+\w+\s+(\d{2})-(\w{3})-(\d{4})\s+(\d+)mV)?[ \t]*(?=\r?\n)/g;
 // Captures the mode label (e.g. "advanced") and any trailing free text before the colon
 // (e.g. " primary v2.0.1", which carries the reading device's own firmware version) —
 // separately from the tag section body itself.
@@ -157,6 +165,12 @@ function parseTagSection(sectionText) {
 export function parseLogText(fullText, unitId) {
   const blocks = [];
   const matches = [...fullText.matchAll(HEADER_RE)];
+  // Carry the last-seen date and unit battery forward across matches so
+  // bare-timestamp anchors (new firmware) inherit them from an earlier full anchor
+  // in the same fetch. If we've never seen a full anchor, we can't produce a valid
+  // ISO timestamp for a bare one, so those blocks are skipped rather than pushed
+  // with a broken date.
+  let lastDay, lastMonStr, lastYear, lastBatteryMv;
 
   for (let i = 0; i < matches.length; i++) {
     const m = matches[i];
@@ -165,15 +179,22 @@ export function parseLogText(fullText, unitId) {
     const bodyEnd = i + 1 < matches.length ? matches[i + 1].index : fullText.length;
     const body = fullText.slice(bodyStart, bodyEnd);
 
-    const timestamp = toIsoTimestamp(time, offset, day, monStr, year);
-    const dateStr = `${day}-${monStr}-${year}`;
+    if (day) { lastDay = day; lastMonStr = monStr; lastYear = year; lastBatteryMv = batteryMv; }
+    const effDay = day ?? lastDay;
+    const effMon = monStr ?? lastMonStr;
+    const effYear = year ?? lastYear;
+    const effBatt = batteryMv ?? lastBatteryMv;
+    if (!effDay) continue; // bare anchor before any full anchor — can't date it
+
+    const timestamp = toIsoTimestamp(time, offset, effDay, effMon, effYear);
+    const dateStr = `${effDay}-${effMon}-${effYear}`;
 
     const base = {
       unitId,
       timestamp,
       date: dateStr,
       time,
-      unitBatteryMv: parseInt(batteryMv, 10),
+      unitBatteryMv: effBatt ? parseInt(effBatt, 10) : null,
     };
 
     if (/LOG TIMEOUT/i.test(body)) {

@@ -155,6 +155,14 @@ assert(missingTextDev.includes('3690mV') && missingTextDev.includes('3400mV'), '
 const missingTextClient = formatMissingTags(missingFromLatest, { windowHours: 7 * 24, thresholdHours: 8, level: 'client' });
 assert(!missingTextClient.includes('mV'), 'client missing list hides battery mV');
 
+console.log('\n--- v2.1.x bare-anchor parser assertions ---');
+const bareAnchorText = read('bareAnchorV21.txt');
+const bareBlocks = parseLogText(bareAnchorText, 'X');
+assert(bareBlocks.length === 2, 'both anchors (full and bare) produce blocks');
+assert(bareBlocks[1].timestamp === '2026-08-19T09:01:52+02:00', 'bare anchor timestamp uses inherited date');
+assert(bareBlocks[1].tags.length === 3, 'bare-anchor discovery yields 3 tags');
+assert(bareBlocks[1].unitBatteryMv === 4016, 'bare-anchor block inherits unit battery from earlier full anchor');
+
 console.log('\n--- client timeout alert assertions ---');
 const fakeTimeout = { timestamp: session.timestamp, timeoutUnitIds: ['866049074634379'], involvedUnitIds: ['866049074634379', '866049074634403'] };
 const clientAlert = formatTimeoutAlert(fakeTimeout, 'client');
