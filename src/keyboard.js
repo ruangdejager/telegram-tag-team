@@ -43,8 +43,9 @@ export function buildFullKeyboard(subscribed, level = 'dev') {
   ]);
   rows.push([
     { text: '🛰 GPS Status Map', callback_data: 'position_map' },
-    { text: '🔥 Heatmap', callback_data: 'heatmap_default' },
+    { text: '🎯 Latest Positions', callback_data: 'latest_positions_map' },
   ]);
+  rows.push([{ text: '🔥 Heatmap', callback_data: 'heatmap_default' }]);
 
   if (level === 'client') {
     rows.push([{ text: '🔋 Battery Status List', callback_data: 'analytics_batt_list' }]);

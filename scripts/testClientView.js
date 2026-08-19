@@ -92,6 +92,8 @@ assert(clientKb.includes('hist_1d') && clientKb.includes('hist_3d') && !clientKb
 assert(devKb.includes('hist_1d') && devKb.includes('hist_3d') && devKb.includes('hist_7d'), 'dev keeps 1d/3d/7d');
 assert(clientKb.includes('GPS Query') && devKb.includes('GPS Query'), 'both levels rename GPS to GPS Query');
 assert(clientKb.includes('GPS Status Map') && devKb.includes('GPS Status Map'), 'both levels rename Map to GPS Status Map');
+assert(clientKb.includes('latest_positions_map') && devKb.includes('latest_positions_map'), 'both levels have Latest Positions button');
+assert(clientKb.includes('Latest Positions') && devKb.includes('Latest Positions'), 'Latest Positions label present on both keyboards');
 assert(clientKb.includes('Battery Status List') && devKb.includes('Battery Level List'), 'client/dev battery button labels diverge');
 
 console.log('\n--- simple keyboard assertions ---');

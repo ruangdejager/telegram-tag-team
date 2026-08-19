@@ -17,36 +17,13 @@ import { parseLogText } from './logParser.js';
 import { mergeSessions } from './sessionMerger.js';
 
 const BATTERY_TREND_DAYS = 7;
-const HEATMAP_DEFAULT_DAYS = 3;
+// Heatmap is a fixed 3-day window. Any tag without a GPS fix in that window is
+// automatically excluded because we only feed it sessions from the last 3 days —
+// there's no separate "last-seen" filter beyond that. Kept as a constant (not
+// user-configurable via /heatmap args any more) so the density colorscale, which
+// is calibrated for a ~3-day view, stays meaningful.
+const HEATMAP_DAYS = 3;
 const RECENT_TAGS_WINDOW_HOURS = 7 * 24; // shared "recently active" window: Missing List + both battery lists
-
-// Parses /heatmap args into a { fromMs, toMs, label } window.
-// Accepts:  ""            -> default 3 days
-//           "5d" / "5"    -> last N days
-//           "YYYY-MM-DD YYYY-MM-DD"  -> explicit inclusive-to-end-of-day range
-// Returns { error: string } on parse failure.
-function parseHeatmapArgs(input) {
-  const parts = String(input || '').trim().split(/\s+/).filter(Boolean);
-  const now = Date.now();
-  if (parts.length === 0) {
-    return { fromMs: now - HEATMAP_DEFAULT_DAYS * 24 * 60 * 60 * 1000, toMs: now, label: `last ${HEATMAP_DEFAULT_DAYS}d` };
-  }
-  if (parts.length === 1) {
-    const m = parts[0].match(/^(\d+)d?$/i);
-    if (!m) return { error: 'Expected <code>Nd</code> (e.g. <code>5d</code>) or <code>YYYY-MM-DD YYYY-MM-DD</code>' };
-    const days = parseInt(m[1], 10);
-    if (days <= 0) return { error: 'Days must be a positive integer.' };
-    return { fromMs: now - days * 24 * 60 * 60 * 1000, toMs: now, label: `last ${days}d` };
-  }
-  if (parts.length === 2) {
-    const from = new Date(parts[0] + 'T00:00:00+02:00');
-    const to = new Date(parts[1] + 'T23:59:59+02:00');
-    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return { error: 'Invalid date. Use <code>YYYY-MM-DD YYYY-MM-DD</code>.' };
-    if (from > to) return { error: 'From-date must be on or before to-date.' };
-    return { fromMs: from.getTime(), toMs: to.getTime(), label: `${parts[0]} → ${parts[1]}` };
-  }
-  return { error: 'Too many arguments. Use <code>Nd</code> or <code>YYYY-MM-DD YYYY-MM-DD</code>.' };
-}
 // Devices don't always finish uploading a bracket's log by the time a given poll runs
 // (e.g. one device is a few polls late). A single "greater than lastProcessedTimestamp"
 // watermark is fragile against that: once a *later* bracket gets sent, the watermark
@@ -94,8 +71,8 @@ export function createBotRuntime(botConfig) {
     return `🐄 <b>${name}</b>\n\n` +
       'Use the buttons below to query tag discovery history, or opt in to receive live updates whenever new tags are detected.\n\n' +
       (isClient
-        ? 'Commands: <code>/gps ID</code>, <code>/missing</code>, <code>/count Nh</code>, <code>/heatmap [Nd | YYYY-MM-DD YYYY-MM-DD]</code>'
-        : `Commands: <code>/battery ID [ID ...]</code> or <code>/battery *</code> (${BATTERY_TREND_DAYS}d trend, per tag or all), <code>/gps ID</code>, <code>/missing</code>, <code>/count Nh</code>, <code>/heatmap [Nd | YYYY-MM-DD YYYY-MM-DD]</code>`);
+        ? `Commands: <code>/gps ID</code>, <code>/missing</code>, <code>/count Nh</code>, <code>/heatmap</code> (last ${HEATMAP_DAYS}d)`
+        : `Commands: <code>/battery ID [ID ...]</code> or <code>/battery *</code> (${BATTERY_TREND_DAYS}d trend, per tag or all), <code>/gps ID</code>, <code>/missing</code>, <code>/count Nh</code>, <code>/heatmap</code> (last ${HEATMAP_DAYS}d)`);
   }
 
   // Applies a live config change (IMEIs / level / display name) without touching the
@@ -173,7 +150,7 @@ export function createBotRuntime(botConfig) {
       return;
     }
     if (text.startsWith('/heatmap')) {
-      await runHeatmap(bot, chatId, subscribed, text.replace(/^\/heatmap\s*/i, ''));
+      await runHeatmap(bot, chatId, subscribed);
       return;
     }
     if (text.startsWith('/map')) {
@@ -231,7 +208,9 @@ export function createBotRuntime(botConfig) {
     } else if (data === 'position_map') {
       await runPositionMap(bot, chatId, subscribed);
     } else if (data === 'heatmap_default') {
-      await runHeatmap(bot, chatId, subscribed, '');
+      await runHeatmap(bot, chatId, subscribed);
+    } else if (data === 'latest_positions_map') {
+      await runLatestPositionMap(bot, chatId, subscribed);
     } else if (data === 'analytics_batt_chart') {
       const sessions = applyTagFilter(await fetchHistorySessions(unitIds, { hoursBack: RECENT_TAGS_WINDOW_HOURS }));
       await sendBatteryChart(bot, chatId, buildTagSeries(sessions), subscribed, level);
@@ -359,17 +338,22 @@ export function createBotRuntime(botConfig) {
     await sendPositionMap(bot, chatId, subscribed, sessions, level);
   }
 
-  async function runHeatmap(bot, chatId, subscribed, rawInput) {
-    const parsed = parseHeatmapArgs(rawInput);
-    if (parsed.error) {
-      await sendWithButtons(bot, chatId, `⚠️ ${parsed.error}`, subscribed);
-      return;
-    }
-    // Fetch the exact window the user asked for; history.js clamps to HISTORY_START.
-    const from = new Date(parsed.fromMs);
-    const sessions = applyTagFilter(await fetchHistorySessions(unitIds, { fromDate: from }));
+  // "Where were the tags right now?" — plots only tags that reported lat/lon in the
+  // most recent discovery, ignoring older GPS fixes entirely. The Latest button already
+  // decides what "latest" is by using the liveWindow, so we reuse that fetch shape.
+  async function runLatestPositionMap(bot, chatId, subscribed) {
+    const sessions = applyTagFilter(await fetchHistorySessions(unitIds, { hoursBack: appConfig.liveWindowHours }));
+    await sendPositionMap(bot, chatId, subscribed, sessions, level, { mode: 'latest' });
+  }
+
+  async function runHeatmap(bot, chatId, subscribed) {
+    // Fixed 3-day window: anything older is dropped implicitly by only fetching the
+    // last 3 days, so a tag without a GPS fix in that window contributes no points.
+    const toMs = Date.now();
+    const fromMs = toMs - HEATMAP_DAYS * 24 * 60 * 60 * 1000;
+    const sessions = applyTagFilter(await fetchHistorySessions(unitIds, { hoursBack: HEATMAP_DAYS * 24 }));
     await sendHeatmap(bot, chatId, subscribed, sessions, {
-      fromMs: parsed.fromMs, toMs: parsed.toMs, label: parsed.label, level,
+      fromMs, toMs, label: `last ${HEATMAP_DAYS}d`, level,
     });
   }
 

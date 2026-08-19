@@ -66,22 +66,54 @@ async function replyNoMapbox(bot, chatId, subscribed, level) {
   });
 }
 
+// Builds pin entries from just the most recent discovery session — one entry per
+// tag that reported lat/lon in that round. Used by the "Latest Positions" variant,
+// which answers "where were the tags right now?" rather than the "ever-known"
+// aggregate that the standard position map shows.
+function entriesFromLatestSession(sessions) {
+  if (sessions.length === 0) return { withGps: [], noGps: [], latestSession: null };
+  const latest = sessions[sessions.length - 1];
+  const t = new Date(latest.timestamp).getTime();
+  const withGps = [];
+  const noGps = [];
+  for (const tag of latest.tags) {
+    if (tag.hasGps) {
+      withGps.push({ id: tag.id, lat: tag.lat, lon: tag.lon, timestampMs: t, hasGps: true, lastSeenMs: t });
+    } else {
+      noGps.push(tag.id);
+    }
+  }
+  noGps.sort();
+  return { withGps, noGps, latestSession: latest };
+}
+
 // Renders a Mapbox Static Images URL with one small coloured pin per GPS-fixed tag.
 // Uses an explicit center+zoom fitted to the bounding box (not Mapbox's default
 // /auto/), so a wider spread of points zooms out but adding more points inside
 // the same bounding box doesn't — the scale reflects geography, not count.
-export async function sendPositionMap(bot, chatId, subscribed, sessions, level = 'dev') {
+//
+// `mode`:
+//   'ever'   (default) — every tag ever seen, plotted at its most recent GPS fix.
+//   'latest'           — only tags that reported lat/lon in the most recent
+//                        discovery, plotted at those coordinates.
+export async function sendPositionMap(bot, chatId, subscribed, sessions, level = 'dev', { mode = 'ever' } = {}) {
   if (!appConfig.mapboxToken) return replyNoMapbox(bot, chatId, subscribed, level);
 
   const now = Date.now();
-  const entries = findAllLatestGps(sessions);
-  const withGps = entries.filter((e) => e.hasGps);
-  const noGps = entries.filter((e) => !e.hasGps).map((e) => e.id).sort();
+  let withGps, noGps, latestSession = null;
+  if (mode === 'latest') {
+    ({ withGps, noGps, latestSession } = entriesFromLatestSession(sessions));
+  } else {
+    const entries = findAllLatestGps(sessions);
+    withGps = entries.filter((e) => e.hasGps);
+    noGps = entries.filter((e) => !e.hasGps).map((e) => e.id).sort();
+  }
 
   if (withGps.length === 0) {
-    await sendPhotoOrError(bot, chatId, subscribed, null,
-      '⚠️ No tags have ever reported a GPS fix.' + (noGps.length ? `\n<i>Ever seen without GPS:</i> ${noGps.join(', ')}` : ''),
-      { level });
+    const emptyMsg = mode === 'latest'
+      ? '⚠️ No tags reported a GPS fix in the latest discovery.' + (noGps.length ? `\n<i>Seen without GPS in the latest discovery:</i> ${noGps.join(', ')}` : '')
+      : '⚠️ No tags have ever reported a GPS fix.' + (noGps.length ? `\n<i>Ever seen without GPS:</i> ${noGps.join(', ')}` : '');
+    await sendPhotoOrError(bot, chatId, subscribed, null, emptyMsg, { level });
     return;
   }
 
@@ -98,28 +130,41 @@ export async function sendPositionMap(bot, chatId, subscribed, sessions, level =
   console.log(`[map] fit=${JSON.stringify(fit)} viewport=${viewport} pins=${withGps.length}`);
   console.log(`[map] url=${url}`);
 
-  const bucketCounts = AGE_BUCKETS.map(() => 0);
-  let oldCount = 0;
-  for (const e of withGps) {
-    const ms = now - e.timestampMs;
-    const idx = AGE_BUCKETS.findIndex((b) => ms < b.maxAgeMs);
-    if (idx === -1) oldCount++;
-    else bucketCounts[idx]++;
+  let caption;
+  if (mode === 'latest') {
+    // All pins share the same timestamp — the latest discovery — so replace the
+    // age-bucket legend with the session's own time+date, and list tag IDs sorted
+    // alphabetically (no age ordering is meaningful here).
+    const tagList = [...withGps].sort((a, b) => a.id.localeCompare(b.id)).map((e) => e.id).join(', ');
+    caption =
+      `🎯 <b>Latest discovery positions</b> — ${latestSession.time} (${latestSession.date})\n` +
+      `${withGps.length} tag${withGps.length !== 1 ? 's' : ''} with GPS\n\n` +
+      tagList +
+      (noGps.length ? `\n<i>No GPS in this discovery:</i> ${noGps.join(', ')}` : '');
+  } else {
+    const bucketCounts = AGE_BUCKETS.map(() => 0);
+    let oldCount = 0;
+    for (const e of withGps) {
+      const ms = now - e.timestampMs;
+      const idx = AGE_BUCKETS.findIndex((b) => ms < b.maxAgeMs);
+      if (idx === -1) oldCount++;
+      else bucketCounts[idx]++;
+    }
+    // Telegram parses '<' as an HTML tag opener even inside body text, so use the
+    // Unicode less-than-or-equal glyph instead of a literal '<'.
+    const legend = AGE_BUCKETS.map((b, i) => `${b.emoji} ${bucketCounts[i]} ${b.ageText}`).join(' · ') +
+      ` · ${OLD_EMOJI} ${oldCount} ${OLD_AGE_TEXT}`;
+    // Oldest fix first (smallest timestampMs = largest age).
+    const tagList = [...withGps]
+      .sort((a, b) => a.timestampMs - b.timestampMs)
+      .map((e) => `${ageEmoji(now - e.timestampMs)} ${e.id}`)
+      .join(', ');
+    caption =
+      `🛰 <b>Last known positions</b> (${withGps.length} tag${withGps.length !== 1 ? 's' : ''})\n` +
+      legend + '\n\n' +
+      tagList +
+      (noGps.length ? `\n<i>No GPS fix ever:</i> ${noGps.join(', ')}` : '');
   }
-  // Telegram parses '<' as an HTML tag opener even inside body text, so use the
-  // Unicode less-than-or-equal glyph instead of a literal '<'.
-  const legend = AGE_BUCKETS.map((b, i) => `${b.emoji} ${bucketCounts[i]} ${b.ageText}`).join(' · ') +
-    ` · ${OLD_EMOJI} ${oldCount} ${OLD_AGE_TEXT}`;
-  // Oldest fix first (smallest timestampMs = largest age).
-  const tagList = [...withGps]
-    .sort((a, b) => a.timestampMs - b.timestampMs)
-    .map((e) => `${ageEmoji(now - e.timestampMs)} ${e.id}`)
-    .join(', ');
-  const caption =
-    `🛰 <b>Last known positions</b> (${withGps.length} tag${withGps.length !== 1 ? 's' : ''})\n` +
-    legend + '\n\n' +
-    tagList +
-    (noGps.length ? `\n<i>No GPS fix ever:</i> ${noGps.join(', ')}` : '');
 
   await sendPhotoOrError(bot, chatId, subscribed, url, caption, { level });
 }
