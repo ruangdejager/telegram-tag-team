@@ -91,9 +91,13 @@ assert(devKb.includes('hist_latest') && devKb.includes('hist_4h') && devKb.inclu
 assert(clientKb.includes('hist_1d') && clientKb.includes('hist_3d') && !clientKb.includes('hist_7d'), 'client keeps 1d/3d, drops 7d');
 assert(devKb.includes('hist_1d') && devKb.includes('hist_3d') && devKb.includes('hist_7d'), 'dev keeps 1d/3d/7d');
 assert(clientKb.includes('GPS Query') && devKb.includes('GPS Query'), 'both levels rename GPS to GPS Query');
-assert(clientKb.includes('GPS Status Map') && devKb.includes('GPS Status Map'), 'both levels rename Map to GPS Status Map');
-assert(clientKb.includes('latest_positions_map') && devKb.includes('latest_positions_map'), 'both levels have Latest Positions button');
-assert(clientKb.includes('Latest Positions') && devKb.includes('Latest Positions'), 'Latest Positions label present on both keyboards');
+// Map / Heatmap / Latest Positions are dev-only: client keyboard is intentionally
+// map-free (client audience gets the count + summary view instead).
+assert(devKb.includes('GPS Status Map') && !clientKb.includes('GPS Status Map'), 'GPS Status Map is dev-only');
+assert(devKb.includes('latest_positions_map') && !clientKb.includes('latest_positions_map'), 'Latest Positions is dev-only');
+assert(devKb.includes('Latest Positions') && !clientKb.includes('Latest Positions'), 'Latest Positions label is dev-only');
+assert(devKb.includes('heatmap_default') && !clientKb.includes('heatmap_default'), 'Heatmap is dev-only');
+assert(devKb.includes('position_map') && !clientKb.includes('position_map'), 'GPS Status Map callback is dev-only');
 assert(clientKb.includes('Battery Status List') && devKb.includes('Battery Level List'), 'client/dev battery button labels diverge');
 
 console.log('\n--- simple keyboard assertions ---');

@@ -41,11 +41,16 @@ export function buildFullKeyboard(subscribed, level = 'dev') {
     { text: '🔍 Missing List', callback_data: 'missing_tags' },
     { text: '📍 GPS Query', callback_data: 'gps_prompt' },
   ]);
-  rows.push([
-    { text: '🛰 GPS Status Map', callback_data: 'position_map' },
-    { text: '🎯 Latest Positions', callback_data: 'latest_positions_map' },
-  ]);
-  rows.push([{ text: '🔥 Heatmap', callback_data: 'heatmap_default' }]);
+  // Map / heatmap views are dev-only — the client audience doesn't need the
+  // spatial detail and keeping the client keyboard shorter matches the
+  // "simplified view" philosophy for that level.
+  if (level !== 'client') {
+    rows.push([
+      { text: '🛰 GPS Status Map', callback_data: 'position_map' },
+      { text: '🎯 Latest Positions', callback_data: 'latest_positions_map' },
+    ]);
+    rows.push([{ text: '🔥 Heatmap', callback_data: 'heatmap_default' }]);
+  }
 
   if (level === 'client') {
     rows.push([{ text: '🔋 Battery Status List', callback_data: 'analytics_batt_list' }]);

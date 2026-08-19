@@ -71,7 +71,7 @@ export function createBotRuntime(botConfig) {
     return `🐄 <b>${name}</b>\n\n` +
       'Use the buttons below to query tag discovery history, or opt in to receive live updates whenever new tags are detected.\n\n' +
       (isClient
-        ? `Commands: <code>/gps ID</code>, <code>/missing</code>, <code>/count Nh</code>, <code>/heatmap</code> (last ${HEATMAP_DAYS}d)`
+        ? 'Commands: <code>/gps ID</code>, <code>/missing</code>, <code>/count Nh</code>'
         : `Commands: <code>/battery ID [ID ...]</code> or <code>/battery *</code> (${BATTERY_TREND_DAYS}d trend, per tag or all), <code>/gps ID</code>, <code>/missing</code>, <code>/count Nh</code>, <code>/heatmap</code> (last ${HEATMAP_DAYS}d)`);
   }
 
@@ -149,11 +149,11 @@ export function createBotRuntime(botConfig) {
       await runMissingTags(bot, chatId, subscribed);
       return;
     }
-    if (text.startsWith('/heatmap')) {
+    if (text.startsWith('/heatmap') && !isClient) {
       await runHeatmap(bot, chatId, subscribed);
       return;
     }
-    if (text.startsWith('/map')) {
+    if (text.startsWith('/map') && !isClient) {
       await runPositionMap(bot, chatId, subscribed);
       return;
     }
@@ -205,11 +205,11 @@ export function createBotRuntime(botConfig) {
     } else if (data === 'gps_prompt') {
       pendingByChat.set(chatId, { action: 'gps' });
       await sendMessage(bot, chatId, '📍 Send the tag ID you want the last GPS location for (e.g. <code>3E1E</code>). Or use <code>/gps 3E1E</code>.');
-    } else if (data === 'position_map') {
+    } else if (data === 'position_map' && !isClient) {
       await runPositionMap(bot, chatId, subscribed);
-    } else if (data === 'heatmap_default') {
+    } else if (data === 'heatmap_default' && !isClient) {
       await runHeatmap(bot, chatId, subscribed);
-    } else if (data === 'latest_positions_map') {
+    } else if (data === 'latest_positions_map' && !isClient) {
       await runLatestPositionMap(bot, chatId, subscribed);
     } else if (data === 'analytics_batt_chart') {
       const sessions = applyTagFilter(await fetchHistorySessions(unitIds, { hoursBack: RECENT_TAGS_WINDOW_HOURS }));
