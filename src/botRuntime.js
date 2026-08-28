@@ -3,7 +3,7 @@ import { appConfig } from './config.js';
 import { buildSimpleKeyboard, buildFullKeyboard } from './keyboard.js';
 import { fetchHistorySessions } from './history.js';
 import { formatSessionMessage, formatTimeoutAlert, formatLatestCount, formatBatteryStatusList, formatCountWindow } from './formatter.js';
-import { groupSessionsByDate, formatDailySummary } from './dailySummary.js';
+import { groupSessionsByDate, formatDailySummaryMessages } from './dailySummary.js';
 import { buildTagSeries } from './analytics.js';
 import { sendBatteryChart, sendBatteryTrendChart } from './charts.js';
 import { sendPositionMap, sendHeatmap } from './maps.js';
@@ -318,11 +318,15 @@ export function createBotRuntime(botConfig) {
       return;
     }
     const { byDate, dateOrder } = groupSessionsByDate(sessions);
-    for (let i = 0; i < dateOrder.length - 1; i++) {
-      await sendMessage(bot, chatId, formatDailySummary(dateOrder[i], byDate[dateOrder[i]], level));
+    // Flattened across dates AND within a date: a single day can itself split into
+    // several Telegram-safe messages (see formatDailySummaryMessages), so every
+    // message in the whole run gets treated the same way — all but the very last
+    // are plain sends, the last one carries the keyboard.
+    const messages = dateOrder.flatMap((d) => formatDailySummaryMessages(d, byDate[d], level));
+    for (let i = 0; i < messages.length - 1; i++) {
+      await sendMessage(bot, chatId, messages[i]);
     }
-    const lastDate = dateOrder[dateOrder.length - 1];
-    await sendWithButtons(bot, chatId, formatDailySummary(lastDate, byDate[lastDate], level), subscribed);
+    await sendWithButtons(bot, chatId, messages[messages.length - 1], subscribed);
   }
 
   async function runMissingTags(bot, chatId, subscribed) {
