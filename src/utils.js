@@ -3,7 +3,7 @@ export const MONTHS = {
   Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12',
 };
 
-const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+export const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const JHB_OFFSET_MS = 2 * 60 * 60 * 1000; // Africa/Johannesburg: fixed UTC+2, no DST
 
 // Converts 'DD-Mon-YYYY' to 'YYYY-MM-DD' so dates sort correctly as strings.

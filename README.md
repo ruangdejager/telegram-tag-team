@@ -26,10 +26,12 @@ npm start
 
 Then in Telegram, message the bot `/start` to see the menu.
 
-`npm run test:parse`, `test:analytics`, `test:modes`, `test:retry`, and
-`test:client` run the parser/merger/report formatters (including the dev-vs-client
-views) against fixtures in `test/fixtures/` without touching the network — useful
-for checking log-format changes before pointing at the real API.
+`npm run test:parse`, `test:analytics`, `test:modes`, `test:retry`,
+`test:client`, and `test:anchors` run the parser/merger/report formatters
+(including the dev-vs-client views, and the dating of firmware v2.1.x's undated
+discovery anchors across midnight) against fixtures in `test/fixtures/` without
+touching the network — useful for checking log-format changes before pointing at
+the real API.
 
 With no registry yet, the process **seeds one bot from the legacy env vars**
 (`UNIT_IDS`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`) as a `dev` bot named
