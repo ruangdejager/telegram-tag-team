@@ -45,9 +45,15 @@ Each device reports in one of two modes, self-described by a CSV header line
 under `Tag Discovery (advanced):` or `Tag Discovery (basic):` — column order
 and field set are read from that header, not hardcoded, since they've already
 changed between firmware versions:
-- **advanced**: `DeviceId,Hops,Wave,RSSI,BatMv,Move,Lat,Lon,FwPatch`
+- **advanced**: `DeviceId,Hops,Wave,RSSI,BatMv,Move,Lat,Lon,FwPatch,RssiSrc`
 - **basic**: `DeviceId,BatMv,RSSI,Move,FwPatch,Lat,Lon,AgeS` (no Hops/Wave;
   `AgeS` = seconds since the GPS fix was taken)
+
+`RssiSrc` (advanced only) is the 4-digit ID of the device that actually received
+that RSSI reading — useful once `Hops` > 0, since the reading then isn't from the
+unit whose log it's in. It's a newer field: devices on older firmware won't report
+it yet, so it's read like any other optional column and simply omitted from the
+raw tables until a tag reports it.
 
 Different devices can run different modes simultaneously — merged session
 tables only show the Hops/Waves/FW columns if at least one tag in that session

@@ -24,12 +24,16 @@ function dashes(n) {
 // Dev table columns. Presence varies by discovery mode (advanced has Hops/Waves,
 // basic doesn't; fw version may or may not be reported) — each optional column
 // is only shown if at least one tag in the session actually has a value for it.
+// "RxDev" (advanced only) is the 4-digit ID of the device that actually received
+// that RSSI reading; devices on older firmware won't report it, so it only shows
+// up once at least one tag in the session carries it.
 // The "St" (status) column shows a coloured dot per the dev battery-status
 // thresholds (batteryStatus.js), which the Battery chart bars also use.
 const DEV_COLUMN_DEFS = [
   { label: 'Tag ID', width: 6, always: true, get: (t) => t.id },
   { label: 'Hops', width: 4, get: (t) => t.hops },
   { label: 'RSSI', width: 6, always: true, get: (t) => t.rssi },
+  { label: 'RxDev', width: 6, get: (t) => t.rssiSource },
   { label: 'Batt', width: 6, always: true, get: (t) => t.battery },
   { label: 'St', width: 3, always: true, get: (t) => batteryEmoji(t.battery) },
   { label: 'Waves', width: 5, get: (t) => t.waveCount },

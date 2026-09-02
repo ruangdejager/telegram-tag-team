@@ -18,10 +18,17 @@
 // from that header every time rather than hardcoded.
 //
 // Two known modes, each with a different field set:
-//   advanced: DeviceId,Hops,Wave,RSSI,BatMv,Move,Lat,Lon,FwPatch
+//   advanced: DeviceId,Hops,Wave,RSSI,BatMv,Move,Lat,Lon,FwPatch,RssiSrc
 //   basic:    DeviceId,BatMv,RSSI,Move,FwPatch,Lat,Lon,AgeS
 // Older logs may have no mode label and no header line at all — those fall
 // back to the original known column order.
+//
+// RssiSrc (advanced only, added later) is the 4-digit device ID of whichever
+// device actually received the tag's transmission and reported this RSSI —
+// relevant when Hops > 0, since the reading isn't necessarily from the unit
+// whose log this is. Devices that haven't updated their firmware yet won't
+// have this column at all, so it's read like any other optional field and
+// left null when the header doesn't include it.
 //
 // A block may instead contain "LOG TIMEOUT" somewhere in its body, indicating the
 // device failed to log a discovery round. Such blocks must be discarded entirely.
@@ -66,6 +73,7 @@ const COLUMN_ALIASES = {
   lon: 'lon',
   fwpatch: 'fwVersionPatch',
   ages: 'gpsAgeSeconds',
+  rssisrc: 'rssiSource',
 };
 
 // Fallback for logs predating the self-describing header line.
@@ -135,6 +143,9 @@ function parseTagRow(rowParts, columnMap) {
     return Number.isNaN(n) ? null : n;
   };
 
+  const rssiSourceRaw = field('rssiSource');
+  const rssiSource = rssiSourceRaw === undefined ? null : sanitizeTagId(rssiSourceRaw).toUpperCase();
+
   const latRaw = field('lat');
   const lonRaw = field('lon');
   const lat = latRaw !== undefined ? parseInt(latRaw, 10) : NaN;
@@ -153,6 +164,7 @@ function parseTagRow(rowParts, columnMap) {
     hasGps,
     fwVersionPatch: toIntOrNull('fwVersionPatch'),
     gpsAgeSeconds: toIntOrNull('gpsAgeSeconds'),
+    rssiSource,
   };
 }
 
