@@ -1,5 +1,5 @@
 import TelegramBot from 'node-telegram-bot-api';
-import { appConfig } from './config.js';
+import { appConfig, BOT_LEVELS } from './config.js';
 import { buildSimpleKeyboard, buildFullKeyboard } from './keyboard.js';
 import { fetchHistorySessions } from './history.js';
 import { formatSessionMessage, formatTimeoutAlert, formatLatestCount, formatBatteryStatusList, formatCountWindow } from './formatter.js';
@@ -12,9 +12,7 @@ import { createStateStore } from './state.js';
 import { findMissingTags, findTagsMissingFromLatest, formatMissingTags, formatMissingTagsInline } from './missingTags.js';
 import { findLatestGpsForTag, findTagLastSeen, formatTagGps } from './tagGps.js';
 import { parseTagIdList, jhbMidnightMsDaysAgo } from './utils.js';
-import { fetchUnitLogText } from './apiClient.js';
-import { parseLogText } from './logParser.js';
-import { mergeSessions } from './sessionMerger.js';
+import { createWebClient, buildSessionsFromReadings } from './webClient.js';
 
 const BATTERY_TREND_DAYS = 7;
 // Heatmap is a fixed 3-day window. Any tag without a GPS fix in that window is
@@ -36,7 +34,9 @@ const POLL_LOOKBACK_HOURS = 4;
 
 // One running bot: owns its Telegram connection, per-chat prompt state, per-bot
 // state + subscriber stores, and level-aware handlers. `botConfig` = { id, name,
-// token, level, unitIds, adminChatId }.
+// token, level, adminChatId, apiToken }. All of its data comes from the
+// tagexplore-web app through the org-scoped web client built from `apiToken` — it
+// never reads a Farmranger log itself.
 //
 // Every handler below takes `bot` as an explicit parameter rather than reading a
 // shared mutable variable — event listeners are registered with the *specific*
@@ -45,20 +45,25 @@ const POLL_LOOKBACK_HOURS = 4;
 // handled, that in-flight call keeps using the real (still-usable-for-API-calls)
 // instance instead of crashing on a null reference.
 export function createBotRuntime(botConfig) {
-  // token / id / adminChatId are immutable for the lifetime of the runtime — a token
-  // change or id change would require tearing everything down anyway. name / level /
-  // unitIds are hot-swappable via applyConfig(): we never restart the Telegram polling
-  // for a config edit, since a fresh new TelegramBot() on the same token would race
-  // with the old poller — Telegram's server keeps the long-poll slot reserved for up
-  // to 50s after the client aborts, so a quick restart 409s. The polling loop and
-  // handler wiring don't depend on the mutable fields; only the data-fetch + render
-  // paths do, and those read from `let` bindings updated below.
-  const { id, token, adminChatId } = botConfig;
+  // token / id / adminChatId / apiToken are immutable for the lifetime of the runtime
+  // — a token or id change would require tearing everything down anyway. name / level
+  // are hot-swappable via applyConfig(): we never restart the Telegram polling for a
+  // config edit, since a fresh new TelegramBot() on the same token would race with the
+  // old poller — Telegram's server keeps the long-poll slot reserved for up to 50s
+  // after the client aborts, so a quick restart 409s. The polling loop and handler
+  // wiring don't depend on the mutable fields; only the data-fetch + render paths do,
+  // and those read from `let` bindings updated below.
+  //
+  // `level` and `allowedTagIds` are cached from the last web /context read (refreshed
+  // on every poll): the web app's token is the real authority on both, so a level or
+  // whitelist change made there lands without redeploying or reconfiguring the bot.
+  const { id, token, adminChatId, apiToken } = botConfig;
+  const webClient = createWebClient(apiToken);
   let name = botConfig.name;
   let level = botConfig.level;
   let isClient = level === 'client';
-  let unitIds = botConfig.unitIds;
-  let allowedTagIds = botConfig.allowedTagIds || [];
+  let orgName = '';
+  let allowedTagIds = [];
   const stateStore = createStateStore(id);
   const subStore = createSubscriberStore(id, adminChatId);
   const pendingByChat = new Map(); // chatId -> { action: 'batt_trend' | 'gps' }
@@ -75,22 +80,37 @@ export function createBotRuntime(botConfig) {
         : `Commands: <code>/battery ID [ID ...]</code> or <code>/battery *</code> (${BATTERY_TREND_DAYS}d trend, per tag or all), <code>/gps ID</code>, <code>/missing</code>, <code>/count Nh</code>, <code>/heatmap</code> (last ${HEATMAP_DAYS}d)`);
   }
 
-  // Applies a live config change (IMEIs / level / display name) without touching the
+  // Applies a live config change (level / display name) without touching the
   // TelegramBot polling connection — the only fields any handler actually reads via
   // closure are the mutable bindings above, so updating them in place is enough.
-  // Refuses to run if id/token/adminChatId are being changed, since those really would
-  // require a fresh runtime.
+  // Refuses to run if id/token/adminChatId/apiToken are being changed, since those
+  // really would require a fresh runtime.
   function applyConfig(newBotConfig) {
     if (newBotConfig.id !== id) throw new Error(`applyConfig: id mismatch (${id} vs ${newBotConfig.id})`);
     if (newBotConfig.token !== token) throw new Error(`applyConfig: token change requires restart`);
     if ((newBotConfig.adminChatId || '') !== (adminChatId || '')) throw new Error('applyConfig: adminChatId change requires restart');
+    if ((newBotConfig.apiToken || '') !== (apiToken || '')) throw new Error('applyConfig: apiToken change requires restart');
     name = newBotConfig.name;
     level = newBotConfig.level;
     isClient = level === 'client';
-    unitIds = newBotConfig.unitIds;
-    allowedTagIds = newBotConfig.allowedTagIds || [];
     welcome = buildWelcome();
-    console.log(`[${id}] Config updated in place (${level}). Units: ${unitIds.join(', ')}. Tag whitelist: ${allowedTagIds.length || 'none'}.`);
+    console.log(`[${id}] Config updated in place (${level}).`);
+  }
+
+  // Pulls this bot's authoritative org/level/whitelist from the web app. Called at
+  // start and on every poll, so a change made in the web admin (level, whitelist,
+  // org rename) reaches the bot without a redeploy. Best-effort: on failure the last
+  // known values stay in place rather than blanking the bot out.
+  async function refreshContext() {
+    const ctx = await webClient.fetchContext();
+    orgName = ctx.orgName || '';
+    allowedTagIds = (ctx.tags || []).map((t) => String(t.tagId || '').toUpperCase()).filter(Boolean);
+    const newLevel = String(ctx.level || level).toLowerCase();
+    if (newLevel !== level && BOT_LEVELS.includes(newLevel)) {
+      level = newLevel;
+      isClient = level === 'client';
+      welcome = buildWelcome();
+    }
   }
 
   // Applies the tag-ID whitelist to a session list: any tag not on the whitelist is
@@ -212,10 +232,10 @@ export function createBotRuntime(botConfig) {
     } else if (data === 'latest_positions_map' && !isClient) {
       await runLatestPositionMap(bot, chatId, subscribed);
     } else if (data === 'analytics_batt_chart') {
-      const sessions = applyTagFilter(await fetchHistorySessions(unitIds, { hoursBack: RECENT_TAGS_WINDOW_HOURS }));
+      const sessions = applyTagFilter(await fetchHistorySessions(webClient, { hoursBack: RECENT_TAGS_WINDOW_HOURS }));
       await sendBatteryChart(bot, chatId, buildTagSeries(sessions), subscribed, level);
     } else if (data === 'analytics_batt_list') {
-      const sessions = applyTagFilter(await fetchHistorySessions(unitIds, { hoursBack: RECENT_TAGS_WINDOW_HOURS }));
+      const sessions = applyTagFilter(await fetchHistorySessions(webClient, { hoursBack: RECENT_TAGS_WINDOW_HOURS }));
       await sendWithButtons(bot, chatId, formatBatteryStatusList(buildTagSeries(sessions)), subscribed);
     } else if (data === 'batt_trend_prompt' && !isClient) {
       pendingByChat.set(chatId, { action: 'batt_trend' });
@@ -253,7 +273,7 @@ export function createBotRuntime(botConfig) {
       await sendWithButtons(bot, chatId, `⚠️ Window too long (max ${COUNT_WINDOW_MAX_HOURS / 24}d).`, subscribed);
       return;
     }
-    const sessions = applyTagFilter(await fetchHistorySessions(unitIds, { hoursBack: hours }));
+    const sessions = applyTagFilter(await fetchHistorySessions(webClient, { hoursBack: hours }));
     // fetchHistorySessions already trims to the requested boundary, so every returned
     // session is inside the window. A whitelist may have zeroed out some sessions'
     // totals — those still count as "a discovery happened" but contribute no tag IDs.
@@ -272,7 +292,7 @@ export function createBotRuntime(botConfig) {
   }
 
   async function sendLatestCount(bot, chatId, subscribed) {
-    const allSessions = applyTagFilter(await fetchHistorySessions(unitIds, { hoursBack: appConfig.liveWindowHours }));
+    const allSessions = applyTagFilter(await fetchHistorySessions(webClient, { hoursBack: appConfig.liveWindowHours }));
     const latest = allSessions.at(-1);
     if (!latest) {
       await sendWithButtons(bot, chatId, `ℹ️ No tag discoveries in the last ${appConfig.liveWindowHours} hours.`, subscribed);
@@ -282,7 +302,7 @@ export function createBotRuntime(botConfig) {
   }
 
   async function sendLatestRawDiscovery(bot, chatId, subscribed) {
-    const allSessions = await fetchHistorySessions(unitIds, { hoursBack: appConfig.liveWindowHours });
+    const allSessions = await fetchHistorySessions(webClient, { hoursBack: appConfig.liveWindowHours });
     const latest = allSessions.at(-1);
     if (!latest) {
       await sendWithButtons(bot, chatId, `ℹ️ No tag discoveries in the last ${appConfig.liveWindowHours} hours.`, subscribed);
@@ -293,7 +313,7 @@ export function createBotRuntime(botConfig) {
   }
 
   async function sendRawDiscoveryData(bot, chatId, subscribed, hoursBack, label) {
-    const allSessions = await fetchHistorySessions(unitIds, { hoursBack: Math.max(hoursBack, appConfig.liveWindowHours) });
+    const allSessions = await fetchHistorySessions(webClient, { hoursBack: Math.max(hoursBack, appConfig.liveWindowHours) });
     const now = new Date();
     const cutoffMs = now.getTime() - hoursBack * 60 * 60 * 1000;
     const displaySessions = allSessions.filter((s) => new Date(s.timestamp).getTime() >= cutoffMs);
@@ -312,7 +332,7 @@ export function createBotRuntime(botConfig) {
   }
 
   async function sendDailySummaries(bot, chatId, subscribed, range, label) {
-    const sessions = applyTagFilter(await fetchHistorySessions(unitIds, range));
+    const sessions = applyTagFilter(await fetchHistorySessions(webClient, range));
     if (sessions.length === 0) {
       await sendWithButtons(bot, chatId, `ℹ️ No tag discoveries in the ${label}.`, subscribed);
       return;
@@ -330,7 +350,7 @@ export function createBotRuntime(botConfig) {
   }
 
   async function runMissingTags(bot, chatId, subscribed) {
-    const sessions = applyTagFilter(await fetchHistorySessions(unitIds, { hoursBack: RECENT_TAGS_WINDOW_HOURS }));
+    const sessions = applyTagFilter(await fetchHistorySessions(webClient, { hoursBack: RECENT_TAGS_WINDOW_HOURS }));
     const missing = findTagsMissingFromLatest(sessions, new Date(), { windowHours: RECENT_TAGS_WINDOW_HOURS });
     await sendWithButtons(bot, chatId, formatMissingTags(missing, { windowHours: RECENT_TAGS_WINDOW_HOURS, level }), subscribed);
   }
@@ -338,7 +358,7 @@ export function createBotRuntime(botConfig) {
   async function runPositionMap(bot, chatId, subscribed) {
     // Pull the whole live-tracking window so a tag last seen 2 days ago (orange) still
     // appears; anything older than that is unlikely to reflect reality anyway.
-    const sessions = applyTagFilter(await fetchHistorySessions(unitIds, { hoursBack: appConfig.liveWindowHours }));
+    const sessions = applyTagFilter(await fetchHistorySessions(webClient, { hoursBack: appConfig.liveWindowHours }));
     await sendPositionMap(bot, chatId, subscribed, sessions, level);
   }
 
@@ -346,7 +366,7 @@ export function createBotRuntime(botConfig) {
   // most recent discovery, ignoring older GPS fixes entirely. The Latest button already
   // decides what "latest" is by using the liveWindow, so we reuse that fetch shape.
   async function runLatestPositionMap(bot, chatId, subscribed) {
-    const sessions = applyTagFilter(await fetchHistorySessions(unitIds, { hoursBack: appConfig.liveWindowHours }));
+    const sessions = applyTagFilter(await fetchHistorySessions(webClient, { hoursBack: appConfig.liveWindowHours }));
     await sendPositionMap(bot, chatId, subscribed, sessions, level, { mode: 'latest' });
   }
 
@@ -355,7 +375,7 @@ export function createBotRuntime(botConfig) {
     // last 3 days, so a tag without a GPS fix in that window contributes no points.
     const toMs = Date.now();
     const fromMs = toMs - HEATMAP_DAYS * 24 * 60 * 60 * 1000;
-    const sessions = applyTagFilter(await fetchHistorySessions(unitIds, { hoursBack: HEATMAP_DAYS * 24 }));
+    const sessions = applyTagFilter(await fetchHistorySessions(webClient, { hoursBack: HEATMAP_DAYS * 24 }));
     await sendHeatmap(bot, chatId, subscribed, sessions, {
       fromMs, toMs, label: `last ${HEATMAP_DAYS}d`, level,
     });
@@ -366,7 +386,7 @@ export function createBotRuntime(botConfig) {
     // Fetch unfiltered so an explicit /battery ID still works for a tag that isn't on
     // the whitelist (explicit lookups are intentional — the user knows what they want).
     // The `*` wildcard applies the whitelist below so "all" means "all tracked."
-    const sessions = await fetchHistorySessions(unitIds, { hoursBack: BATTERY_TREND_DAYS * 24 });
+    const sessions = await fetchHistorySessions(webClient, { hoursBack: BATTERY_TREND_DAYS * 24 });
     const series = buildTagSeries(sessions);
 
     let ids;
@@ -405,7 +425,7 @@ export function createBotRuntime(botConfig) {
       return;
     }
     const tagId = ids[0];
-    const sessions = await fetchHistorySessions(unitIds, {});
+    const sessions = await fetchHistorySessions(webClient, {});
     const gps = findLatestGpsForTag(sessions, tagId);
     const seen = findTagLastSeen(sessions, tagId);
     await sendWithButtons(bot, chatId, formatTagGps(tagId, gps, seen), subscribed);
@@ -417,6 +437,10 @@ export function createBotRuntime(botConfig) {
   async function pollOnce() {
     const bot = activeBot;
     if (!bot) return;
+
+    // Re-sync org/level/whitelist from the web app every poll so admin changes there
+    // land without a redeploy. Best-effort — a blip keeps the last known context.
+    try { await refreshContext(); } catch (err) { console.error(`[${id}] Context refresh failed:`, err.message); }
 
     const now = new Date();
     const fromOverride = new Date(now.getTime() - POLL_LOOKBACK_HOURS * 60 * 60 * 1000);
@@ -466,20 +490,18 @@ export function createBotRuntime(botConfig) {
     }
   }
 
-  // Fetches + merges across this bot's units, with the same buffered-refetch window
-  // pollOnce needs. Discarded (timeout) sessions are kept here so live push can alert.
+  // Rebuilds this bot's sessions over the buffered-refetch window pollOnce needs,
+  // straight from the web app's stored readings — no logs, no parsing. The web app
+  // only stores successful readings, so there are no discarded (timeout) sessions
+  // to surface here any more.
   async function fetchAllSessions(now, fromOverride) {
-    const blocksByUnit = {};
-    for (const unitId of unitIds) {
-      try {
-        const text = await fetchUnitLogText(unitId, now, fromOverride);
-        blocksByUnit[unitId] = parseLogText(text, unitId);
-      } catch (err) {
-        console.error(`[${id}] Failed to fetch/parse logs for unit ${unitId}:`, err.message);
-        blocksByUnit[unitId] = [];
-      }
+    try {
+      const { readings, rounds } = await webClient.fetchReadings(fromOverride.getTime(), now.getTime());
+      return buildSessionsFromReadings(readings, rounds);
+    } catch (err) {
+      console.error(`[${id}] Failed to fetch readings from web app:`, err.message);
+      return [];
     }
-    return mergeSessions(blocksByUnit);
   }
 
   function start() {
@@ -493,7 +515,10 @@ export function createBotRuntime(botConfig) {
     bot.on('polling_error', (err) => console.error(`[${id}] Telegram polling error:`, err.message));
     bot.on('message', (msg) => handleMessage(bot, msg).catch((err) => console.error(`[${id}] handleMessage error:`, err)));
     bot.on('callback_query', (q) => handleCallbackQuery(bot, q).catch((err) => console.error(`[${id}] handleCallbackQuery error:`, err)));
-    console.log(`[${id}] Started (${level}). Units: ${unitIds.join(', ')}.`);
+    // Warm the org/level/whitelist context so on-demand menu queries have it before
+    // the first scheduled poll. Fire-and-forget — the poll refreshes it regardless.
+    refreshContext().catch((err) => console.error(`[${id}] Initial context load failed:`, err.message));
+    console.log(`[${id}] Started (${level}).`);
   }
 
   async function stop() {

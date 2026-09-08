@@ -62,7 +62,7 @@ export function formatPerDeviceTotals(perDeviceTotals) {
     .join(' ');
 }
 
-// Tag IDs are at most 4 raw bytes, but sanitizeTagId (logParser.js) strips any
+// Tag IDs are at most 4 raw bytes, but the web app's parser strips any
 // leading/trailing non-printable byte — so a real, already-sanitized ID can be
 // shorter than 4 chars (e.g. 'D1E' when the true 4-byte ID had a non-printable
 // lead byte). Accept 1-4 printable-ASCII chars here to match what's actually

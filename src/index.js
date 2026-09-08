@@ -1,5 +1,4 @@
 import { appConfig } from './config.js';
-import { seedAndMigrate } from './bootstrap.js';
 import { createBotManager } from './botManager.js';
 import { startManagerBot } from './managerBot.js';
 
@@ -22,8 +21,6 @@ function scheduleNextTick(botManager) {
 let pollTimer = null;
 
 async function main() {
-  seedAndMigrate();
-
   const botManager = createBotManager();
   const started = botManager.startAll();
   console.log(`Started ${started.length} bot(s): ${started.join(', ') || '(none)'}. Polling at :${String(appConfig.pollMinute).padStart(2, '0')} past every hour.`);

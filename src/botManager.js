@@ -1,8 +1,7 @@
 import { createBotRuntime } from './botRuntime.js';
 import {
   loadRegistry, saveRegistry, addBot as registryAddBot, removeBot as registryRemoveBot,
-  updateBot as registryUpdateBot, addImei as registryAddImei, removeImei as registryRemoveImei,
-  setAllowedTags as registrySetAllowedTags, getBot,
+  updateBot as registryUpdateBot, getBot,
 } from './registry.js';
 
 // Owns the registry (source of truth on disk) and the map of live bot runtimes.
@@ -52,8 +51,8 @@ export function createBotManager() {
     return removed;
   }
 
-  // Applies a registry change that affects how the bot runs (IMEIs or level) by
-  // hot-swapping the config inside the existing runtime. We deliberately DO NOT
+  // Applies a registry change that affects how the bot runs (level / display name)
+  // by hot-swapping the config inside the existing runtime. We deliberately DO NOT
   // stop and restart the runtime here: creating a new TelegramBot on the same token
   // while the previous poller is still in-flight causes Telegram to return 409s on
   // the reserved long-poll slot for up to ~50s, and node-telegram-bot-api keeps
@@ -69,10 +68,7 @@ export function createBotManager() {
     return updated;
   }
 
-  const addImei = (id, imei) => applyLiveUpdate(id, () => registryAddImei(registry, id, imei));
-  const removeImei = (id, imei) => applyLiveUpdate(id, () => registryRemoveImei(registry, id, imei));
   const setLevel = (id, level) => applyLiveUpdate(id, () => registryUpdateBot(registry, id, { level }));
-  const setAllowedTags = (id, tagIds) => applyLiveUpdate(id, () => registrySetAllowedTags(registry, id, tagIds));
 
   function list() {
     return registry.bots.map((b) => ({ ...b, running: runningBots.has(b.id) }));
@@ -97,5 +93,5 @@ export function createBotManager() {
     runningBots.clear();
   }
 
-  return { startAll, addBot, removeBot, addImei, removeImei, setLevel, setAllowedTags, list, pollAll, stopAll, hasBot: (id) => runningBots.has(id) };
+  return { startAll, addBot, removeBot, setLevel, list, pollAll, stopAll, hasBot: (id) => runningBots.has(id) };
 }

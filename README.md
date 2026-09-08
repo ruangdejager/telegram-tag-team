@@ -1,20 +1,43 @@
 # Farmranger Tag Bot
 
-Runs **one or more Telegram bots from a single process**, each with its own bot
-token and its own set of device IMEIs. For each bot, it polls its units'
-Farmranger logs, merges same-round discovery blocks across those devices into a
-single session, and pushes new unique tag discoveries to that bot's Telegram
-subscribers. Devices retry after a `LOG TIMEOUT` and often succeed a few seconds
-later — a timed-out block is simply excluded in favor of a successful retry in
-the same round; only if *no* device produced a usable reading is the round
-discarded and flagged.
+A **lightweight Telegram front end for [tagexplore-web](../tagexplore-web)**. It runs
+**one or more Telegram bots from a single process**, each connected to one
+organisation in the web app. Every bot reads that organisation's tag-discovery data
+from the web app's API and reports it in Telegram — raw discovery tables, daily
+summaries, battery charts, GPS lookups and satellite maps. It pushes new discoveries
+to subscribers as they appear.
 
-Each bot has a **level**: `dev` (full technical insight) or `client` (a reduced,
-non-technical view — see *Bots, levels & the manager bot* below). Bots are added
-and managed live through an owner-only **manager bot** — no redeploy needed.
+The bot does **no log scraping, parsing or merging of its own** — the tagexplore-web
+app does all of that and stores the results. The bot only ever reads back through a
+per-organisation access token, so it stays small and cheap to run.
 
-Every bot has a `/start` menu (inline buttons) for on-demand queries. History
-never reaches earlier than `HISTORY_START` (device data isn't valid before then).
+Each bot has a **level** — `dev` (full technical insight) or `client` (a reduced,
+non-technical view) — which is set on its access token in the web app. Bots are added
+and managed live through an owner-only **manager bot**; no redeploy needed.
+
+## How it fits together
+
+```
+Farmranger logs ──▶ tagexplore-web (scrape, parse, store in SQLite) ──▶ web API
+                                                                          │
+                                        Authorization: Bearer <token>     │
+                                                                          ▼
+                                                          Farmranger Tag Bot (this)
+                                                            reads one org, shows in Telegram
+```
+
+- **tagexplore-web** owns everything: devices/IMEIs, the tag whitelist, ingest
+  scheduling, and the database. It manages all of that in its own admin UI.
+- **This bot** only *connects* a Telegram bot to an existing organisation and chooses
+  its dev/client level. It never allocates IMEIs or edits whitelists.
+
+The only coupling is two HTTP surfaces the web app exposes:
+
+- `GET /api/bot/context` and `GET /api/bot/readings` — the per-org read API, authed by
+  a bot access token (one per bot).
+- `GET /api/provision/orgs`, `POST|PATCH|DELETE /api/provision/tokens` — a
+  server-to-server API the manager bot uses to mint/level/revoke those tokens, authed
+  by a single shared `BOT_PROVISION_TOKEN`.
 
 ## Local setup
 
@@ -24,169 +47,117 @@ cp .env.example .env   # fill in real values (a working .env is already present 
 npm start
 ```
 
-Then in Telegram, message the bot `/start` to see the menu.
+Set at least `WEB_API_BASE` (where tagexplore-web is reachable). To add bots through
+the manager, also set `WEB_PROVISION_TOKEN` (matching the web app's), plus
+`MANAGER_BOT_TOKEN` / `MANAGER_CHAT_ID`.
 
-`npm run test:parse`, `test:analytics`, `test:modes`, `test:retry`,
-`test:client`, and `test:anchors` run the parser/merger/report formatters
-(including the dev-vs-client views, and the dating of firmware v2.1.x's undated
-discovery anchors across midnight) against fixtures in `test/fixtures/` without
-touching the network — useful for checking log-format changes before pointing at
-the real API.
+Then in Telegram, message a worker bot `/start` to see its menu.
 
-With no registry yet, the process **seeds one bot from the legacy env vars**
-(`UNIT_IDS`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`) as a `dev` bot named
-`primary`, and migrates any old flat `data/state.json` / `data/subscribers.json`
-into `data/primary/`. After that the registry (`data/registry.json`) is the
-source of truth and those env vars are ignored.
-
-### Log format
-
-Each device reports in one of two modes, self-described by a CSV header line
-under `Tag Discovery (advanced):` or `Tag Discovery (basic):` — column order
-and field set are read from that header, not hardcoded, since they've already
-changed between firmware versions:
-- **advanced**: `DeviceId,Hops,Wave,RSSI,BatMv,Move,Lat,Lon,FwPatch,RssiSrc`
-- **basic**: `DeviceId,BatMv,RSSI,Move,FwPatch,Lat,Lon,AgeS` (no Hops/Wave;
-  `AgeS` = seconds since the GPS fix was taken)
-
-`RssiSrc` (advanced only) is the 4-digit ID of the device that actually received
-that RSSI reading — useful once `Hops` > 0, since the reading then isn't from the
-unit whose log it's in. It's a newer field: devices on older firmware won't report
-it yet, so it's read like any other optional column and simply omitted from the
-raw tables until a tag reports it.
-
-Different devices can run different modes simultaneously — merged session
-tables only show the Hops/Waves/FW columns if at least one tag in that session
-actually has a value for them. GPS is always shown as Y/N, never raw
-coordinates. Logs predating this header convention fall back to the original
-known column order.
+History never reaches earlier than `HISTORY_START` (device data isn't valid before then).
 
 ## Features
 
-- **Live push**: every new merged discovery session is sent to everyone who
-  tapped "Opt In" for that bot, as soon as it's detected. No chat is
-  pre-subscribed — every bot starts with zero subscribers, including you;
-  message the bot `/start` and tap Opt In to receive its live updates.
-- **LOG TIMEOUT handling**: a device that times out often retries and succeeds
-  a few seconds later in the same round — the failed block is simply excluded
-  and the successful retry is used. Only when *no* device produced a usable
-  reading for the round is it discarded and a warning sent instead of data.
-- **Discovery duration**: shown as `Discovery took Ns` on every session,
-  assuming the round started exactly at its 15-minute bracket boundary
-  (`MERGE_BRACKET_MINUTES`) — the longest time any one device took to produce
-  its successful reading.
+- **Live push**: every new discovery round is sent to everyone who tapped "Opt In" for
+  that bot, as soon as it's detected on the next poll. No chat is pre-subscribed —
+  every bot starts with zero subscribers, including you; message the bot `/start` and
+  tap Opt In to receive its live updates.
 - **`/start` menu** (button labels kept short for mobile — full names below):
-  - 📋 Latest / 4h / 24h — raw per-session tag tables. Raw views also append
-    any **missing tags** (seen in the last `LIVE_WINDOW_HOURS` but not in the
-    last `MISSING_THRESHOLD_HOURS`).
-  - 📊 1d / 3d / 7d — daily summaries, showing **total discoveries that day**,
-    **combined unique tag count per discovery** (deduped across all devices)
+  - 📋 Latest / 4h / 24h — raw per-round tag tables. Raw views also append any
+    **missing tags** (seen in the last `LIVE_WINDOW_HOURS` but not in the last
+    `MISSING_THRESHOLD_HOURS`).
+  - 📊 1d / 3d / 7d — daily summaries: **total discoveries that day**, **combined
+    unique tag count per discovery** (deduped across all of the org's devices)
     alongside each device's own count, plus the day's full unique-tag roll-up.
   - 🔍 Missing — same missing-tags list on demand.
-  - 📍 GPS — prompts for a tag ID, returns its last known GPS fix as a Google
-    Maps link.
-  - 🛰 Map — satellite map with a coloured pin per tag at its last known GPS
-    fix. Pin colour = age of fix: 🟢 <2h, 🟡 <24h, 🟠 <3d, 🔴 older. Tags that
-    have never reported GPS are listed in the caption.
-  - 🔥 Heat — spatial density heatmap of all GPS readings, on satellite. Default
-    is the last 3 days; use `/heatmap 7d` or `/heatmap 2026-07-25 2026-08-01`
-    for a custom window.
+  - 📍 GPS — prompts for a tag ID, returns its last known GPS fix as a Google Maps link.
+  - 🛰 Map — satellite map with a coloured pin per tag at its last known GPS fix. Pin
+    colour = age of fix: 🟢 <2h, 🟡 <24h, 🟠 <3d, 🔴 older. Tags that have never
+    reported GPS are listed in the caption.
+  - 🔥 Heat — spatial density heatmap of all GPS readings, on satellite (last 3 days).
   - 🔋 Battery — full-fleet snapshot chart (latest reading per tag).
-  - 📉 Trend — prompts for one or more tag IDs, returns a battery-over-time
-    line chart for just those tags over the last 7 days (one line per tag).
-    Readings are time-bucketed to keep the render fast regardless of how often
-    a tag actually reports.
+  - 📉 Trend — prompts for one or more tag IDs, returns a 7-day battery-over-time line
+    chart for just those tags (one line per tag).
+  - 🕒 Count — unique tag count over a rolling window you specify.
   - ✅/❌ Opt in/out of live push updates.
-- **Text commands** (dev): `/battery ID [ID ...]` (7-day trend chart, one or
-  more tags), `/gps ID`, `/missing`, `/heatmap [Nd | YYYY-MM-DD YYYY-MM-DD]`,
-  `/map`. On client bots `/battery` is disabled.
+- **Text commands** (dev): `/battery ID [ID ...]` or `/battery *` (7-day trend),
+  `/gps ID`, `/missing`, `/count Nh`, `/heatmap`, `/map`. On client bots `/battery`,
+  `/heatmap` and `/map` are disabled.
 
 ## Bots, levels & the manager bot
 
-Every bot is a registry entry: `{ id, name, token, level, unitIds, adminChatId }`,
-stored in `data/registry.json` on the volume. All bots run in one process and
-share the same hourly poll tick; each keeps its own `lastProcessedTimestamp` and
-subscriber list under `data/<id>/`, so two bots pointing at the same IMEIs push
-independently.
+Every bot is a registry entry: `{ id, name, token, level, adminChatId, apiToken }`,
+stored in `data/registry.json` on the volume. `token` is the Telegram bot token;
+`apiToken` is the web app's org access token that decides which organisation the bot
+reads and — authoritatively — its level. All bots run in one process and share the same
+hourly poll tick; each keeps its own state and subscriber list under `data/<id>/`.
 
 **Levels** change only what a bot shows:
-- `dev` — everything above (full raw tables with RSSI/hops/waves/mov/FW +
-  discovery duration + per-device/IMEI breakdown, daily summaries with per-device
-  columns and the day's tag-ID list, plus the Trend chart).
-- `client` — raw discovery (Latest/4h/24h) and live push show **only Tag ID, a
-  battery status dot (🟢/🟡/🔴) and GPS Y/N**, with the combined unique count
-  as the headline (no FW, IMEIs, mV numbers, or duration). Summaries show
-  **Time + Combined only** (no per-device column, no tag-ID list); the **Trend**
-  feature is removed. Missing, GPS lookup, Battery chart, 🛰 Map, 🔥 Heat and
-  Opt in/out are unchanged.
+- `dev` — full raw tables (RSSI/hops/waves/mov/FW + discovery duration + per-device/IMEI
+  breakdown), daily summaries with per-device columns and the day's tag-ID list, plus
+  the Trend chart, 🛰 Map and 🔥 Heat.
+- `client` — raw discovery and live push show **only Tag ID, a battery status dot
+  (🟢/🟡/🔴) and GPS Y/N**, with the combined unique count as the headline. Summaries
+  show **Time + Combined only**. Trend, 🛰 Map and 🔥 Heat are removed.
 
-Battery status thresholds (client dots): 🟢 ≥ 3650mV, 🟡 3450–3650mV, 🔴 < 3450mV.
+The level (and the org's tag whitelist) are re-read from the web app on every poll, so
+changing either in the web app or via `/setlevel` lands without a redeploy.
 
 **Manager bot** (owner-only) — set `MANAGER_BOT_TOKEN` and `MANAGER_CHAT_ID`. It
-responds *only* to `MANAGER_CHAT_ID` and drives the registry live (no redeploy):
-- `/addbot` — guided: id, name, level, IMEIs, then the token (that message is
-  auto-deleted). Starts the new bot immediately with zero subscribers — message
-  the new bot and tap Opt In to start receiving its updates.
-- `/listbots`, `/removebot <id>`, `/addimei <id> <imei>`, `/removeimei <id> <imei>`,
-  `/setlevel <id> dev|client` — IMEI/level changes restart just that bot.
+responds *only* to `MANAGER_CHAT_ID` and does exactly two things:
+- `/addbot` — guided: id, name, then **pick one of the web app's organisations**, then
+  dev/client, then the Telegram token (that message is auto-deleted). It mints the org
+  access token in the web app and starts the new bot immediately with zero subscribers.
+- `/listbots`, `/removebot <id>`, `/setlevel <id> dev|client` — `/setlevel` updates the
+  web token's level and hot-swaps the running bot.
+
+Everything else about an organisation — its IMEIs, tag whitelist, ingest — is managed in
+the tagexplore-web admin UI, not here.
 
 ## Config (`.env`) — process-global
 
-- `MERGE_BRACKET_MINUTES` — discovery timestamps are rounded to the nearest
-  bracket of this many minutes (default 15). Every block that rounds to the same
-  bracket — any device, even repeats from the same device — becomes one session.
-- `POLL_MINUTE` — minute past the hour on which to poll (default 20). Farmranger
-  uploads at :15; polling at :20 catches a fresh upload with a small margin.
-- `LIVE_WINDOW_HOURS` / `MISSING_THRESHOLD_HOURS` — a tag counts as "missing"
-  if seen in the live window (default 72h) but not the threshold window (8h).
+- `WEB_API_BASE` — the tagexplore-web base URL (no trailing slash). Required.
+- `WEB_PROVISION_TOKEN` — shared secret matching the web app's `BOT_PROVISION_TOKEN`;
+  the manager bot uses it to mint/level/revoke tokens. Blank disables provisioning.
+- `POLL_MINUTE` — minute past the hour on which to poll the web app (default 20).
+- `LIVE_WINDOW_HOURS` / `MISSING_THRESHOLD_HOURS` — a tag counts as "missing" if seen in
+  the live window (default 72h) but not the threshold window (8h).
 - `HISTORY_START` — earliest date (ISO) any history query/chart reaches.
 - `DATA_DIR` — base dir for `registry.json` and each bot's `data/<id>/` files
   (use `/data` on Railway).
 - `MANAGER_BOT_TOKEN` / `MANAGER_CHAT_ID` — the manager bot (blank = disabled).
-- `MAPBOX_TOKEN` — public Mapbox token for the 🛰 Map and 🔥 Heat features.
-  Get one at [account.mapbox.com/access-tokens](https://account.mapbox.com/access-tokens);
-  the free tier is 50k static-image loads/month. If blank, those buttons reply
-  with a friendly "not configured" message instead of crashing.
-- Legacy seed (optional): `UNIT_IDS`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
-  (+ optional `LEGACY_BOT_ID`/`_NAME`/`_LEVEL`) seed one bot when the registry
-  is empty; ignored once `registry.json` exists.
+- `MAPBOX_TOKEN` — public Mapbox token for the 🛰 Map and 🔥 Heat features. Get one at
+  [account.mapbox.com/access-tokens](https://account.mapbox.com/access-tokens); the free
+  tier is 50k static-image loads/month. If blank, those buttons reply with a friendly
+  "not configured" message instead of crashing.
 
 ## Rendering stack
 
-Charts (battery snapshot, battery trend) and the density heatmap are rendered
-via **Plotly + Kaleido** (Python) — Node shells out to a small script in
-`scripts/plotly_render.py` that reads a Plotly figure JSON from stdin and writes
-a PNG to stdout. Kaleido bundles a headless Chromium for offline export; the
-container is ~200MB larger than a Node-only one as a result. Setup is declared
-in `railpack.json` (adds Python 3.12 via mise + runs `pip install plotly
-kaleido` as a build step) so Railway's Railpack builder handles it in one step
-with no Dockerfile required. If Railway ever falls back to Nixpacks on your
-service, the same result can be achieved by adding a `nixpacks.toml` with
-`nixPkgs = ["nodejs_20", "python3", "python3Packages.pip"]` and an install
-phase that runs `pip install plotly==5.24.1 kaleido==0.2.1`.
-
-The position map is a **Mapbox Static Images** URL with one coloured pin per
-tag — no Plotly needed for that view. Both position map and heatmap require
+Charts (battery snapshot, battery trend) and the density heatmap are rendered via
+**Plotly + Kaleido** (Python) — Node shells out to a small script in
+`scripts/plotly_render.py` that reads a Plotly figure JSON from stdin and writes a PNG to
+stdout. Setup is declared in `railpack.json` (adds Python 3.12 via mise + runs
+`pip install plotly kaleido` as a build step). The position map is a **Mapbox Static
+Images** URL with one coloured pin per tag. Both position map and heatmap require
 `MAPBOX_TOKEN`.
 
 ## Deploying to Railway
 
-1. Push to a GitHub repo (or `railway init`).
-2. **Attach a volume** (required — the container filesystem is wiped on every
-   redeploy/restart; the volume holds `registry.json`, so without it every bot,
-   subscriber list and push position is lost): service → **Volumes** →
-   **New Volume** → Mount Path `/data`.
-3. Set service variables: the process-global vars above, `DATA_DIR=/data`,
-   `MANAGER_BOT_TOKEN`/`MANAGER_CHAT_ID`, and (for maps/heatmap) `MAPBOX_TOKEN`.
-   For the very first bot you can either set the legacy seed vars or just add
-   it via the manager bot after deploy.
-4. `railway up` (or connect the repo for auto-deploy), then use the manager bot
-   to add your bots.
+1. Deploy tagexplore-web first and set its `BOT_PROVISION_TOKEN`. Create your
+   organisations (and their devices/whitelists) there.
+2. Push this repo to GitHub (or `railway init`).
+3. **Attach a volume** (required — the container filesystem is wiped on every
+   redeploy/restart; the volume holds `registry.json` and each bot's state/subscribers):
+   service → **Volumes** → **New Volume** → Mount Path `/data`.
+4. Set service variables: `WEB_API_BASE` (the web app's URL), `WEB_PROVISION_TOKEN`
+   (matching the web app), `DATA_DIR=/data`, `MANAGER_BOT_TOKEN` / `MANAGER_CHAT_ID`,
+   and (for maps/heatmap) `MAPBOX_TOKEN`.
+5. `railway up` (or connect the repo for auto-deploy), then use the manager bot's
+   `/addbot` to connect bots to your organisations.
 
-No webhook or public URL is needed — every bot uses Telegram long polling, and
-each bot (and the manager) has its own token so they never conflict.
+No webhook or public URL is needed — every bot uses Telegram long polling, and each bot
+(and the manager) has its own token so they never conflict.
 
-On `SIGTERM`/`SIGINT` (a Railway redeploy sends `SIGTERM` to the old container),
-every bot's long-poll is stopped cleanly before exit — without this, the old and
-new container briefly hold the same Telegram connection open and fight over it
-(repeated 409 errors) until the stale one times out server-side.
+On `SIGTERM`/`SIGINT` (a Railway redeploy sends `SIGTERM` to the old container), every
+bot's long-poll is stopped cleanly before exit — without this, the old and new container
+briefly hold the same Telegram connection open and fight over it (repeated 409 errors)
+until the stale one times out server-side.

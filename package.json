@@ -1,19 +1,13 @@
 {
   "name": "farmranger-tag-bot",
   "version": "1.0.0",
-  "description": "Telegram bot that merges Farmranger tag-discovery logs from multiple devices and reports new discoveries.",
+  "description": "Lightweight Telegram front end for tagexplore-web: reads one organisation's tag-discovery data from the web app's API and reports new discoveries. Does no log scraping itself.",
   "type": "module",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "postinstall": "node scripts/install-python-deps.mjs",
-    "test:parse": "node scripts/testParse.js",
-    "test:analytics": "node scripts/testAnalytics.js",
-    "test:modes": "node scripts/testModes.js",
-    "test:retry": "node scripts/testRetryTimeout.js",
-    "test:client": "node scripts/testClientView.js",
-    "test:anchors": "node scripts/testBareAnchors.js"
+    "postinstall": "node scripts/install-python-deps.mjs"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

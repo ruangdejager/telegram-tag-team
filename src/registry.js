@@ -61,26 +61,3 @@ export function updateBot(registry, id, patch) {
   return updated;
 }
 
-export function addImei(registry, id, imei) {
-  const bot = getBot(registry, id);
-  imei = String(imei).trim();
-  if (!imei) throw new Error('Empty IMEI');
-  if (bot.unitIds.includes(imei)) throw new Error(`Bot "${id}" already has IMEI ${imei}`);
-  return updateBot(registry, id, { unitIds: [...bot.unitIds, imei] });
-}
-
-export function setAllowedTags(registry, id, tagIds) {
-  getBot(registry, id); // validate existence
-  const normalized = (Array.isArray(tagIds) ? tagIds : String(tagIds || '').split(/[\s,]+/))
-    .map((s) => String(s).trim().toUpperCase())
-    .filter(Boolean);
-  return updateBot(registry, id, { allowedTagIds: normalized });
-}
-
-export function removeImei(registry, id, imei) {
-  const bot = getBot(registry, id);
-  imei = String(imei).trim();
-  if (!bot.unitIds.includes(imei)) throw new Error(`Bot "${id}" has no IMEI ${imei}`);
-  if (bot.unitIds.length === 1) throw new Error(`Bot "${id}" must keep at least one IMEI`);
-  return updateBot(registry, id, { unitIds: bot.unitIds.filter((u) => u !== imei) });
-}
