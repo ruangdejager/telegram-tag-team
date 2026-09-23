@@ -89,7 +89,8 @@ Every bot is a registry entry: `{ id, name, token, level, adminChatId, apiToken 
 stored in `data/registry.json` on the volume. `token` is the Telegram bot token;
 `apiToken` is the web app's org access token that decides which organisation the bot
 reads and — authoritatively — its level. All bots run in one process and share the same
-hourly poll tick; each keeps its own state and subscriber list under `data/<id>/`.
+poll tick (default every 60s); each keeps its own state and subscriber list under
+`data/<id>/`.
 
 **Levels** change only what a bot shows:
 - `dev` — full raw tables (RSSI/hops/waves/mov/FW + discovery duration + per-device/IMEI
@@ -99,8 +100,9 @@ hourly poll tick; each keeps its own state and subscriber list under `data/<id>/
   (🟢/🟡/🔴) and GPS Y/N**, with the combined unique count as the headline. Summaries
   show **Time + Combined only**. Trend, 🛰 Map and 🔥 Heat are removed.
 
-The level (and the org's tag whitelist) are re-read from the web app on every poll, so
-changing either in the web app or via `/setlevel` lands without a redeploy.
+The level (and the org's tag whitelist, including which tags are switched off) are
+re-read from the web app periodically (`CONTEXT_REFRESH_MINUTES`, default 10), so
+changing any of them in the web app or via `/setlevel` lands without a redeploy.
 
 **Manager bot** (owner-only) — set `MANAGER_BOT_TOKEN` and `MANAGER_CHAT_ID`. It
 responds *only* to `MANAGER_CHAT_ID` and does exactly two things:
@@ -118,7 +120,12 @@ the tagexplore-web admin UI, not here.
 - `WEB_API_BASE` — the tagexplore-web base URL (no trailing slash). Required.
 - `WEB_PROVISION_TOKEN` — shared secret matching the web app's `BOT_PROVISION_TOKEN`;
   the manager bot uses it to mint/level/revoke tokens. Blank disables provisioning.
-- `POLL_MINUTE` — minute past the hour on which to poll the web app (default 20).
+- `POLL_SECONDS` — how often to poll the web app for new discoveries (default 60).
+- `SETTLE_SECONDS` — how long a bracket's content must stay unchanged before it's
+  announced, so multiple readers landing in the same bracket a few seconds/minutes
+  apart are reported once, complete (default 120).
+- `CONTEXT_REFRESH_MINUTES` — how often to re-pull org name/level/whitelist from the
+  web app (default 10).
 - `LIVE_WINDOW_HOURS` / `MISSING_THRESHOLD_HOURS` — a tag counts as "missing" if seen in
   the live window (default 72h) but not the threshold window (8h).
 - `HISTORY_START` — earliest date (ISO) any history query/chart reaches.

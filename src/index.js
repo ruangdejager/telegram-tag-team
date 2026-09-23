@@ -2,16 +2,11 @@ import { appConfig } from './config.js';
 import { createBotManager } from './botManager.js';
 import { startManagerBot } from './managerBot.js';
 
-function msUntilNextPollTick(now = new Date()) {
-  const next = new Date(now);
-  next.setMinutes(appConfig.pollMinute, 0, 0);
-  if (next <= now) next.setHours(next.getHours() + 1);
-  return next.getTime() - now.getTime();
-}
-
+// Self-rescheduling setTimeout, re-armed only after the previous cycle finishes —
+// never setInterval — so a slow poll (a stalled fetch, a burst of sends) can't
+// stack a second cycle on top of itself.
 function scheduleNextTick(botManager) {
-  const delayMs = msUntilNextPollTick();
-  console.log(`Next poll for all bots at ${new Date(Date.now() + delayMs).toISOString()} (in ${Math.round(delayMs / 1000)}s).`);
+  const delayMs = appConfig.pollSeconds * 1000;
   return setTimeout(async () => {
     await botManager.pollAll();
     pollTimer = scheduleNextTick(botManager);
@@ -23,7 +18,7 @@ let pollTimer = null;
 async function main() {
   const botManager = createBotManager();
   const started = botManager.startAll();
-  console.log(`Started ${started.length} bot(s): ${started.join(', ') || '(none)'}. Polling at :${String(appConfig.pollMinute).padStart(2, '0')} past every hour.`);
+  console.log(`Started ${started.length} bot(s): ${started.join(', ') || '(none)'}. Polling every ${appConfig.pollSeconds}s.`);
 
   const managerBot = startManagerBot(botManager);
 
@@ -46,7 +41,7 @@ async function main() {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  // Catch anything missed since last shutdown, then align to the hourly schedule.
+  // Catch anything missed since last shutdown, then start the regular cycle.
   await botManager.pollAll();
   pollTimer = scheduleNextTick(botManager);
 }

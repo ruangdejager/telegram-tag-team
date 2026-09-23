@@ -10,8 +10,13 @@ function base() {
   return appConfig.webApiBase.replace(/\/$/, '');
 }
 
+// A 20s cap: at hourly cadence a hung fetch was invisible, but the fast poll cycle
+// fans out sequentially across every running bot (botManager.pollAll), so one stuck
+// request would otherwise stall every other bot's poll behind it.
+const FETCH_TIMEOUT_MS = 20_000;
+
 async function getJson(url, token) {
-  const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+  const res = await fetch(url, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   const text = await res.text();
   if (!res.ok) {
     let msg = text.slice(0, 200);
@@ -98,7 +103,7 @@ export function buildSessionsFromReadings(readings, rounds) {
 }
 
 function bucketToSession(bracketAt, rows, roundRows) {
-  const { date, time, iso } = epochToJhb(bracketAt);
+  const { date: bracketDate, time: bracketTime, iso } = epochToJhb(bracketAt);
 
   const tagById = new Map();
   const perDeviceTagIds = {}; // imei -> Set of tag ids
@@ -144,14 +149,43 @@ function bucketToSession(bracketAt, rows, roundRows) {
   const perDeviceFwVersion = {};
   for (const r of roundRows) if (r.reader_fw) perDeviceFwVersion[r.device_imei] = r.reader_fw;
 
-  const durationSeconds = roundRows.length
-    ? Math.max(0, ...roundRows.map((r) => r.duration_seconds ?? 0))
-    : 0;
+  // Where a bracket holds both a pushed (CBOR) and a scraped (log) round, the pushed
+  // one wins on timing — it carries the firmware's own measured duration and the
+  // server's real arrival clock, both better than anything the scraped path can
+  // infer from the bracket boundary. Mirrors Store.listDiscoveryCounts on the web
+  // app side (apps/api/src/db/index.ts), which applies the same precedence.
+  const pushedRounds = roundRows.filter((r) => r.source === 'cbor');
+  const scrapedRounds = roundRows.filter((r) => r.source !== 'cbor');
+  const maxDuration = (rs) => {
+    const vals = rs.map((r) => r.duration_seconds).filter((v) => v != null);
+    return vals.length ? Math.max(...vals) : null;
+  };
+  const firmwareDuration = maxDuration(pushedRounds);
+  const bracketDuration = maxDuration(scrapedRounds);
+  const receivedAt = pushedRounds.length
+    ? Math.min(...pushedRounds.map((r) => r.received_at).filter((v) => v != null))
+    : null;
+  const source = pushedRounds.length ? 'cbor' : 'log';
+  const durationSource = firmwareDuration != null ? 'firmware' : bracketDuration != null ? 'bracket' : null;
+  const durationSeconds = firmwareDuration ?? bracketDuration ?? 0;
+
+  // Display clock: the real arrival time for a pushed bracket, since that's a true
+  // instant rather than a 15-minute bucket; the bracket's own clock otherwise, which
+  // is all a scraped round has. `timestamp` (the ISO sort/de-dupe key used everywhere
+  // else — history.js, missingTags.js, analytics.js, botRuntime.js's sentTimestamps
+  // set) deliberately stays keyed on the bracket: an arrival-based timestamp would let
+  // the same bracket reappear under a second key and be announced twice.
+  const displayClock = epochToJhb(receivedAt ?? bracketAt);
 
   return {
     timestamp: iso,
-    date,
-    time,
+    date: displayClock.date,
+    time: displayClock.time,
+    bracketDate,
+    bracketTime,
+    source,
+    receivedAt,
+    durationSource,
     discarded: false,
     involvedUnitIds: Object.keys(perDeviceTagIds),
     tags: [...tagById.values()],

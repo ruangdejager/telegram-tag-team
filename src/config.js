@@ -11,8 +11,20 @@ export const appConfig = {
   // Shared secret matching the web app's BOT_PROVISION_TOKEN. Only the manager bot
   // uses it, to attach a new bot to an org and set its dev/client level.
   webProvisionToken: process.env.WEB_PROVISION_TOKEN || '',
-  // Minute past the hour on which to poll the web app for new discoveries.
-  pollMinute: parseInt(process.env.POLL_MINUTE || '20', 10),
+  // How often to poll the web app for new discoveries (seconds). The bot never
+  // scrapes anything itself any more, so there's no reason to wait for the hour —
+  // this just re-reads /api/bot/readings on a short cycle.
+  pollSeconds: parseInt(process.env.POLL_SECONDS || '60', 10),
+  // How long a bracket's content must stay unchanged before it's announced.
+  // Multiple readers can push (or a scrape can land) into the same bracket a few
+  // seconds or minutes apart; this absorbs that so a round is reported once,
+  // complete, rather than once per reader as they trickle in.
+  settleSeconds: parseInt(process.env.SETTLE_SECONDS || '120', 10),
+  // How often to re-pull /api/bot/context (org name, level, tag whitelist) on the
+  // poll cycle. Refreshing it every poll would be a wasted request most of the
+  // time; this still catches an admin's whitelist/level change within a bounded
+  // window without hammering the endpoint.
+  contextRefreshMinutes: parseInt(process.env.CONTEXT_REFRESH_MINUTES || '10', 10),
   // Sliding window of history to keep in RAM for missing-tag detection etc.
   liveWindowHours: parseInt(process.env.LIVE_WINDOW_HOURS || '72', 10),
   // A tag is "missing" if seen in the liveWindow but not in the last N hours.

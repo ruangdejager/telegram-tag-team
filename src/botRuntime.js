@@ -54,22 +54,29 @@ export function createBotRuntime(botConfig) {
   // wiring don't depend on the mutable fields; only the data-fetch + render paths do,
   // and those read from `let` bindings updated below.
   //
-  // `level` and `allowedTagIds` are cached from the last web /context read (refreshed
-  // on every poll): the web app's token is the real authority on both, so a level or
-  // whitelist change made there lands without redeploying or reconfiguring the bot.
+  // `level`, `activeTagIds` and `hiddenTagIds` are cached from the last web /context
+  // read (throttled to contextRefreshMinutes, see maybeRefreshContext): the web app's
+  // token is the real authority on all three, so a level, whitelist or tag-toggle
+  // change made there lands without redeploying or reconfiguring the bot.
   const { id, token, adminChatId, apiToken } = botConfig;
   const webClient = createWebClient(apiToken);
   let name = botConfig.name;
   let level = botConfig.level;
   let isClient = level === 'client';
   let orgName = '';
-  let allowedTagIds = [];
+  // Whitelisted tags, split by org_tags.hidden: active ones count towards the
+  // discovery total and its denominator; hidden ones (decommissioned, or never put
+  // on an animal) are dropped from every count but still tallied as "(+N)" if one
+  // checks in anyway. Both empty means no whitelist is configured at all.
+  let activeTagIds = [];
+  let hiddenTagIds = [];
+  let lastContextRefreshAt = null; // ms epoch; null until the first successful refresh
   const stateStore = createStateStore(id);
   const subStore = createSubscriberStore(id, adminChatId);
   const pendingByChat = new Map(); // chatId -> { action: 'batt_trend' | 'gps' }
 
   let activeBot = null; // only used by start()/stop()/pollOnce(), never by event handlers
-  let state = { lastProcessedTimestamp: null, sentTimestamps: [] };
+  let state = { lastProcessedTimestamp: null, sentTimestamps: [], pendingBrackets: {} };
 
   let welcome = buildWelcome();
   function buildWelcome() {
@@ -98,13 +105,17 @@ export function createBotRuntime(botConfig) {
   }
 
   // Pulls this bot's authoritative org/level/whitelist from the web app. Called at
-  // start and on every poll, so a change made in the web admin (level, whitelist,
-  // org rename) reaches the bot without a redeploy. Best-effort: on failure the last
-  // known values stay in place rather than blanking the bot out.
+  // start and (throttled) on the poll cycle, so a change made in the web admin
+  // (level, whitelist, a tag's hidden flag, org rename) reaches the bot without a
+  // redeploy. Best-effort: on failure the last known values stay in place rather
+  // than blanking the bot out.
   async function refreshContext() {
     const ctx = await webClient.fetchContext();
     orgName = ctx.orgName || '';
-    allowedTagIds = (ctx.tags || []).map((t) => String(t.tagId || '').toUpperCase()).filter(Boolean);
+    const tags = ctx.tags || [];
+    const upperTagId = (t) => String(t.tagId || '').toUpperCase();
+    activeTagIds = tags.filter((t) => !t.hidden).map(upperTagId).filter(Boolean);
+    hiddenTagIds = tags.filter((t) => t.hidden).map(upperTagId).filter(Boolean);
     const newLevel = String(ctx.level || level).toLowerCase();
     if (newLevel !== level && BOT_LEVELS.includes(newLevel)) {
       level = newLevel;
@@ -113,18 +124,45 @@ export function createBotRuntime(botConfig) {
     }
   }
 
-  // Applies the tag-ID whitelist to a session list: any tag not on the whitelist is
-  // stripped, and each session's `total` is recomputed from the remaining tag count.
-  // No-op when the whitelist is empty, so bots without one behave exactly as before.
-  // Used everywhere EXCEPT the dev-side raw discovery buttons (Latest / Last 4h /
-  // Last 24h), which must always surface the true unfiltered reading.
+  // Gates refreshContext() to once per contextRefreshMinutes — at a 60s poll cycle,
+  // refreshing on every tick would be a wasted request almost every time. Always
+  // refreshes on the very first call (lastContextRefreshAt is still null then), so a
+  // freshly started bot doesn't wait out the full interval before its first read.
+  // Best-effort like refreshContext itself: a failed refresh leaves the last known
+  // values in place and is retried on the next poll rather than waiting out the
+  // interval again.
+  async function maybeRefreshContext() {
+    const nowMs = Date.now();
+    if (lastContextRefreshAt !== null && nowMs - lastContextRefreshAt < appConfig.contextRefreshMinutes * 60 * 1000) return;
+    try {
+      await refreshContext();
+      lastContextRefreshAt = nowMs;
+    } catch (err) {
+      console.error(`[${id}] Context refresh failed:`, err.message);
+    }
+  }
+
+  // Applies the tag whitelist to a session list. A tag is either active (kept, counts
+  // towards `total`), hidden (whitelisted but org_tags.hidden — decommissioned, or
+  // never put on an animal; dropped from `tags`/`total` but tallied in
+  // `hiddenSeenIds` since it still checked in), or unknown (not on the whitelist at
+  // all; dropped silently, as before). No-op when there's no whitelist configured at
+  // all (both lists empty), so bots without one behave exactly as before. Used
+  // everywhere EXCEPT the dev-side raw discovery buttons (Latest / Last 4h / Last
+  // 24h), which must always surface the true unfiltered reading.
   function applyTagFilter(sessions) {
-    if (allowedTagIds.length === 0) return sessions;
-    const allow = new Set(allowedTagIds);
+    if (activeTagIds.length === 0 && hiddenTagIds.length === 0) return sessions;
+    const active = new Set(activeTagIds);
+    const hidden = new Set(hiddenTagIds);
     return sessions.map((s) => {
-      const filteredTags = s.tags.filter((t) => allow.has(t.id));
-      if (filteredTags.length === s.tags.length) return s;
-      return { ...s, tags: filteredTags, total: filteredTags.length };
+      const keptTags = [];
+      const hiddenSeenIds = [];
+      for (const t of s.tags) {
+        if (active.has(t.id)) keptTags.push(t);
+        else if (hidden.has(t.id)) hiddenSeenIds.push(t.id);
+      }
+      if (keptTags.length === s.tags.length && hiddenSeenIds.length === 0) return s;
+      return { ...s, tags: keptTags, total: keptTags.length, hiddenSeenIds };
     });
   }
 
@@ -278,15 +316,23 @@ export function createBotRuntime(botConfig) {
     // session is inside the window. A whitelist may have zeroed out some sessions'
     // totals — those still count as "a discovery happened" but contribute no tag IDs.
     const uniqueIds = new Set();
+    const hiddenSeenIds = new Set();
     let sessionCount = 0;
     for (const s of sessions) {
       sessionCount++;
       for (const t of s.tags) uniqueIds.add(t.id);
+      for (const tagId of s.hiddenSeenIds || []) hiddenSeenIds.add(tagId);
     }
     await sendWithButtons(
       bot,
       chatId,
-      formatCountWindow({ hours, uniqueTagCount: uniqueIds.size, sessionCount }),
+      formatCountWindow({
+        hours,
+        uniqueTagCount: uniqueIds.size,
+        sessionCount,
+        activeTagTotal: activeTagIds.length,
+        hiddenSeenCount: hiddenSeenIds.size,
+      }),
       subscribed,
     );
   }
@@ -298,7 +344,7 @@ export function createBotRuntime(botConfig) {
       await sendWithButtons(bot, chatId, `ℹ️ No tag discoveries in the last ${appConfig.liveWindowHours} hours.`, subscribed);
       return;
     }
-    await sendWithButtons(bot, chatId, formatLatestCount(latest), subscribed);
+    await sendWithButtons(bot, chatId, formatLatestCount(latest, activeTagIds.length), subscribed);
   }
 
   async function sendLatestRawDiscovery(bot, chatId, subscribed) {
@@ -393,8 +439,9 @@ export function createBotRuntime(botConfig) {
     if (trimmed === '*') {
       // Wildcard: every tag with battery data in the last 7 days. Sorted so the
       // legend order is stable across renders and matches what /battery reports.
-      // Whitelist-aware: `*` means "all tracked" when a whitelist is configured.
-      const allow = allowedTagIds.length ? new Set(allowedTagIds) : null;
+      // Whitelist-aware: `*` means "all tracked (and not switched off)" when a
+      // whitelist is configured.
+      const allow = activeTagIds.length ? new Set(activeTagIds) : null;
       ids = Object.keys(series).filter((id) => !allow || allow.has(id)).sort();
       if (ids.length === 0) {
         await sendWithButtons(bot, chatId, `⚠️ No battery data for any tag in the last ${BATTERY_TREND_DAYS} days.`, subscribed);
@@ -431,20 +478,35 @@ export function createBotRuntime(botConfig) {
     await sendWithButtons(bot, chatId, formatTagGps(tagId, gps, seen), subscribed);
   }
 
-  // One poll cycle: fetch each unit's logs since last processed, merge, push any new
-  // sessions to this bot's subscribers using this bot's level. No-ops if the runtime
-  // isn't currently started (activeBot is null) — e.g. a poll firing mid-restart.
+  // A bracket's content signature: changes whenever a new reader's data lands in it
+  // (tag count, device count, duration or arrival clock moves). Used by the settle
+  // window below to tell "still filling up" from "done" without caring whether the
+  // new data came in via a CBOR push or a scrape.
+  function sessionSignature(session) {
+    return `${session.tags.length}|${session.involvedUnitIds.length}|${session.durationSeconds}|${session.receivedAt ?? 0}`;
+  }
+
+  // One poll cycle: fetch readings since the last lookback window, hold each new
+  // bracket until its content stops changing, then push it to this bot's
+  // subscribers using this bot's level. No-ops if the runtime isn't currently
+  // started (activeBot is null) — e.g. a poll firing mid-restart.
   async function pollOnce() {
     const bot = activeBot;
     if (!bot) return;
 
-    // Re-sync org/level/whitelist from the web app every poll so admin changes there
-    // land without a redeploy. Best-effort — a blip keeps the last known context.
-    try { await refreshContext(); } catch (err) { console.error(`[${id}] Context refresh failed:`, err.message); }
+    // Re-sync org/level/whitelist from the web app, throttled — see
+    // maybeRefreshContext. Best-effort — a blip keeps the last known context.
+    await maybeRefreshContext();
 
     const now = new Date();
-    const fromOverride = new Date(now.getTime() - POLL_LOOKBACK_HOURS * 60 * 60 * 1000);
+    const nowMs = now.getTime();
+    const cutoffMs = nowMs - POLL_LOOKBACK_HOURS * 60 * 60 * 1000;
+    const fromOverride = new Date(cutoffMs);
     const sentTimestamps = new Set(state.sentTimestamps || []);
+    // A working copy: mutated as brackets are tracked/settled/sent below, then
+    // persisted once at the end of the cycle regardless of how it ends (nothing
+    // ready yet, some sent, or a send failure broke out of the loop partway).
+    const pendingBrackets = { ...(state.pendingBrackets || {}) };
     // Migration guard: a bot upgraded from the old single-watermark scheme has a
     // lastProcessedTimestamp but an empty sentTimestamps set. Without this, the first
     // poll after the upgrade would treat everything already sent in the lookback window
@@ -457,6 +519,19 @@ export function createBotRuntime(botConfig) {
       .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 
     for (const session of sessions) {
+      const sig = sessionSignature(session);
+      const pending = pendingBrackets[session.timestamp];
+      const alreadyStable = pending && pending.sig === sig;
+      const settled = alreadyStable && nowMs - pending.stableSince >= appConfig.settleSeconds * 1000;
+
+      if (!settled) {
+        // New sighting, or its content just changed (another reader landed): (re)start
+        // the settle clock. Leave an already-stable-but-not-yet-due entry untouched so
+        // its stableSince doesn't keep sliding forward.
+        pendingBrackets[session.timestamp] = alreadyStable ? pending : { sig, stableSince: nowMs };
+        continue;
+      }
+
       try {
         const recipients = subStore.getRecipients();
         if (session.discarded) {
@@ -471,23 +546,33 @@ export function createBotRuntime(botConfig) {
             // discoveries involving their tracked fleet).
             console.log(`[${id}] Session ${session.timestamp}: ${session.total} raw tag(s), 0 after whitelist — skipping push.`);
           } else {
-            console.log(`[${id}] Session ${session.timestamp}: ${filtered.total} tracked tag(s) across ${session.involvedUnitIds.join(', ')}.`);
-            const text = formatLatestCount(filtered);
+            console.log(`[${id}] Session ${session.timestamp}: ${filtered.total}/${activeTagIds.length} tracked tag(s) across ${session.involvedUnitIds.join(', ')}.`);
+            const text = formatLatestCount(filtered, activeTagIds.length);
             for (const chatId of recipients) await sendWithButtons(bot, chatId, text, subStore.isOptedIn(chatId));
           }
         }
         sentTimestamps.add(session.timestamp);
-        // Prune anything the lookback window can no longer re-fetch anyway, so the
-        // set doesn't grow unbounded — it only needs to cover POLL_LOOKBACK_HOURS.
-        const cutoffMs = now.getTime() - POLL_LOOKBACK_HOURS * 60 * 60 * 1000;
-        state.sentTimestamps = [...sentTimestamps].filter((ts) => new Date(ts).getTime() >= cutoffMs);
+        delete pendingBrackets[session.timestamp];
         state.lastProcessedTimestamp = session.timestamp;
-        stateStore.save(state);
       } catch (err) {
         console.error(`[${id}] Failed to send session ${session.timestamp}:`, err.message);
-        break; // retry this and later sessions on the next poll
+        // Leave this bracket's pending entry as already-settled (don't touch it) so
+        // the very next poll retries it immediately instead of waiting out another
+        // full settle window. Also stop here, as before: later sessions in this
+        // cycle retry next poll too, preserving send order.
+        break;
       }
     }
+
+    // Prune anything the lookback window can no longer re-fetch anyway, so neither
+    // map grows unbounded — they only need to cover POLL_LOOKBACK_HOURS. Persisted
+    // once here regardless of outcome, so a bracket newly tracked this cycle (but
+    // not yet settled) isn't lost if the process restarts before it's due.
+    state.sentTimestamps = [...sentTimestamps].filter((ts) => new Date(ts).getTime() >= cutoffMs);
+    state.pendingBrackets = Object.fromEntries(
+      Object.entries(pendingBrackets).filter(([ts]) => new Date(ts).getTime() >= cutoffMs),
+    );
+    stateStore.save(state);
   }
 
   // Rebuilds this bot's sessions over the buffered-refetch window pollOnce needs,
@@ -516,8 +601,12 @@ export function createBotRuntime(botConfig) {
     bot.on('message', (msg) => handleMessage(bot, msg).catch((err) => console.error(`[${id}] handleMessage error:`, err)));
     bot.on('callback_query', (q) => handleCallbackQuery(bot, q).catch((err) => console.error(`[${id}] handleCallbackQuery error:`, err)));
     // Warm the org/level/whitelist context so on-demand menu queries have it before
-    // the first scheduled poll. Fire-and-forget — the poll refreshes it regardless.
-    refreshContext().catch((err) => console.error(`[${id}] Initial context load failed:`, err.message));
+    // the first scheduled poll. Fire-and-forget — maybeRefreshContext() will retry
+    // on the poll cycle regardless. Tracks lastContextRefreshAt on success so that
+    // first poll (which typically fires moments later) doesn't redundantly refetch.
+    refreshContext()
+      .then(() => { lastContextRefreshAt = Date.now(); })
+      .catch((err) => console.error(`[${id}] Initial context load failed:`, err.message));
     console.log(`[${id}] Started (${level}).`);
   }
 

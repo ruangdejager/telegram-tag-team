@@ -21,6 +21,16 @@ function dashes(n) {
   return '-'.repeat(n);
 }
 
+// Labels a session's duration by how it was obtained — the firmware's own on-air
+// measurement (a pushed/CBOR round) vs. an estimate inferred from the bracket
+// boundary (a scraped/log round) — so the number is never read as the wrong kind.
+// Empty when neither kind of round had a duration to report (session.durationSource
+// is null): older data, or every device excluded upstream.
+function durationLabel(session) {
+  if (!session.durationSource) return '';
+  return session.durationSource === 'firmware' ? ' (measured by the firmware)' : ' (inferred from the bracket)';
+}
+
 // Dev table columns. Presence varies by discovery mode (advanced has Hops/Waves,
 // basic doesn't; fw version may or may not be reported) — each optional column
 // is only shown if at least one tag in the session actually has a value for it.
@@ -80,7 +90,7 @@ function formatClientSession(session) {
 function formatDevSession(session) {
   const header =
     `🏷 <b>Tag Discovery — ${session.time} (${session.date})</b>\n` +
-    `<i>Discovery took ${session.durationSeconds}s</i>\n` +
+    `<i>Discovery took ${session.durationSeconds}s${durationLabel(session)}</i>\n` +
     `<i>St: 🟢≥3800mV Fully charged · 🔵≥3600mV Good · 🟠≥3500mV watch · 🔴&lt;3500mV low battery (gps not allowed)</i>\n` +
     `<pre>${formatDeviceBreakdown(session)}</pre>\n\n`;
 
@@ -121,11 +131,27 @@ export function formatSessionMessage(session, level = 'dev') {
 // Minimal headline view: just the discovery time + unique-tag total, no table,
 // no device breakdown. Used by the "Latest Count" button and the opted-in push
 // notification (both levels — there's nothing level-specific to hide here).
-export function formatLatestCount(session) {
+//
+// `activeTagTotal` is the org's non-hidden whitelist size (the denominator for a
+// "coverage" reading like 18/18); omitted or 0 (no whitelist configured) falls back
+// to the bare count. `session.hiddenSeenIds` — tags switched off but heard anyway —
+// show as a "(+N)" outside the fraction: the denominator is what's expected to
+// check in, and a decommissioned tag isn't. A ⚡ marks a round the firmware pushed
+// live rather than one the log scrape picked up.
+export function formatLatestCount(session, activeTagTotal = 0) {
+  const badge = session.source === 'cbor' ? '⚡ ' : '';
+  const hiddenSeen = session.hiddenSeenIds?.length || 0;
+  const countLine = activeTagTotal > 0
+    ? `<b>${session.total}/${activeTagTotal}</b>${hiddenSeen > 0 ? ` <i>(+${hiddenSeen} switched off)</i>` : ''}`
+    : `<b>${session.total}</b>`;
+  const durationLine = session.durationSource
+    ? `\n<i>Discovery took ${session.durationSeconds}s${durationLabel(session)}</i>`
+    : '';
   return (
-    `🏷 <b>Tag Discovery — ${session.time} (${session.date})</b>\n` +
+    `${badge}🏷 <b>Tag Discovery — ${session.time} (${session.date})</b>\n` +
     `<i>Unique tags detected:</i>\n\n` +
-    `<b>${session.total}</b>`
+    countLine +
+    durationLine
   );
 }
 
@@ -133,12 +159,17 @@ export function formatLatestCount(session) {
 // hours, plus how many discoveries fell in that window. The user picks `hours`
 // (via the Count Window button or /count command); the whitelist, if any, has
 // already been applied upstream so this only counts what the bot is tracking.
-export function formatCountWindow({ hours, uniqueTagCount, sessionCount }) {
+// `activeTagTotal` / `hiddenSeenCount` mirror formatLatestCount's fraction and
+// "(+N)" suffix, unioned across every session in the window.
+export function formatCountWindow({ hours, uniqueTagCount, sessionCount, activeTagTotal = 0, hiddenSeenCount = 0 }) {
   const windowLabel = hours % 24 === 0 ? `${hours / 24}d` : `${hours}h`;
+  const countLine = activeTagTotal > 0
+    ? `<b>${uniqueTagCount}/${activeTagTotal}</b>${hiddenSeenCount > 0 ? ` <i>(+${hiddenSeenCount} switched off)</i>` : ''}`
+    : `<b>${uniqueTagCount}</b>`;
   return (
     `🏷 <b>Tag Count — last ${windowLabel}</b>\n` +
     `<i>Unique tags detected:</i>\n\n` +
-    `<b>${uniqueTagCount}</b>\n\n` +
+    countLine + `\n\n` +
     `<i>across ${sessionCount} discover${sessionCount === 1 ? 'y' : 'ies'}</i>`
   );
 }
