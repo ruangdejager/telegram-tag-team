@@ -137,21 +137,18 @@ export function formatSessionMessage(session, level = 'dev') {
 // to the bare count. `session.hiddenSeenIds` — tags switched off but heard anyway —
 // show as a "(+N)" outside the fraction: the denominator is what's expected to
 // check in, and a decommissioned tag isn't. A ⚡ marks a round the firmware pushed
-// live rather than one the log scrape picked up.
+// live rather than one the log scrape picked up. Duration is deliberately left off
+// this headline view (see formatDevSession for the labelled duration line).
 export function formatLatestCount(session, activeTagTotal = 0) {
   const badge = session.source === 'cbor' ? '⚡ ' : '';
   const hiddenSeen = session.hiddenSeenIds?.length || 0;
   const countLine = activeTagTotal > 0
     ? `<b>${session.total}/${activeTagTotal}</b>${hiddenSeen > 0 ? ` <i>(+${hiddenSeen} switched off)</i>` : ''}`
     : `<b>${session.total}</b>`;
-  const durationLine = session.durationSource
-    ? `\n<i>Discovery took ${session.durationSeconds}s${durationLabel(session)}</i>`
-    : '';
   return (
     `${badge}🏷 <b>Tag Discovery — ${session.time} (${session.date})</b>\n` +
     `<i>Unique tags detected:</i>\n\n` +
-    countLine +
-    durationLine
+    countLine
   );
 }
 
