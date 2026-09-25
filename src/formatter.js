@@ -143,7 +143,7 @@ export function formatLatestCount(session, activeTagTotal = 0) {
   const badge = session.source === 'cbor' ? '⚡ ' : '';
   const hiddenSeen = session.hiddenSeenIds?.length || 0;
   const countLine = activeTagTotal > 0
-    ? `<b>${session.total}/${activeTagTotal}</b>${hiddenSeen > 0 ? ` <i>(+${hiddenSeen} switched off)</i>` : ''}`
+    ? `<b>${session.total}/${activeTagTotal}</b>${hiddenSeen > 0 ? ` <i>(+${hiddenSeen})</i>` : ''}`
     : `<b>${session.total}</b>`;
   return (
     `${badge}🏷 <b>Tag Discovery — ${session.time} (${session.date})</b>\n` +
@@ -161,7 +161,7 @@ export function formatLatestCount(session, activeTagTotal = 0) {
 export function formatCountWindow({ hours, uniqueTagCount, sessionCount, activeTagTotal = 0, hiddenSeenCount = 0 }) {
   const windowLabel = hours % 24 === 0 ? `${hours / 24}d` : `${hours}h`;
   const countLine = activeTagTotal > 0
-    ? `<b>${uniqueTagCount}/${activeTagTotal}</b>${hiddenSeenCount > 0 ? ` <i>(+${hiddenSeenCount} switched off)</i>` : ''}`
+    ? `<b>${uniqueTagCount}/${activeTagTotal}</b>${hiddenSeenCount > 0 ? ` <i>(+${hiddenSeenCount})</i>` : ''}`
     : `<b>${uniqueTagCount}</b>`;
   return (
     `🏷 <b>Tag Count — last ${windowLabel}</b>\n` +
