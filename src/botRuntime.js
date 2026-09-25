@@ -294,6 +294,7 @@ export function createBotRuntime(botConfig) {
   // hint so the user can retry without re-prompting.
   const COUNT_WINDOW_MAX_HOURS = 30 * 24; // cap the window at the historyStart's ballpark
   async function runCountWindow(bot, chatId, subscribed, rawInput) {
+    await maybeRefreshContext();
     const trimmed = String(rawInput || '').trim();
     const match = trimmed.match(/^(\d+)\s*([hd])?$/i);
     if (!match) {
@@ -338,6 +339,7 @@ export function createBotRuntime(botConfig) {
   }
 
   async function sendLatestCount(bot, chatId, subscribed) {
+    await maybeRefreshContext();
     const allSessions = applyTagFilter(await fetchHistorySessions(webClient, { hoursBack: appConfig.liveWindowHours }));
     const latest = allSessions.at(-1);
     if (!latest) {
@@ -348,6 +350,7 @@ export function createBotRuntime(botConfig) {
   }
 
   async function sendLatestRawDiscovery(bot, chatId, subscribed) {
+    await maybeRefreshContext();
     const allSessions = await fetchHistorySessions(webClient, { hoursBack: appConfig.liveWindowHours });
     const latest = allSessions.at(-1);
     if (!latest) {
@@ -359,6 +362,7 @@ export function createBotRuntime(botConfig) {
   }
 
   async function sendRawDiscoveryData(bot, chatId, subscribed, hoursBack, label) {
+    await maybeRefreshContext();
     const allSessions = await fetchHistorySessions(webClient, { hoursBack: Math.max(hoursBack, appConfig.liveWindowHours) });
     const now = new Date();
     const cutoffMs = now.getTime() - hoursBack * 60 * 60 * 1000;
